@@ -60,6 +60,7 @@
 	 ufunsort_error/1,
 	 zip_unzip/1, zip_unzip3/1, zipwith/1, zipwith3/1,
 	 filter_partition/1, 
+	 ifoldl/1, ifoldr/1, imap/1, ifilter/1, ipartition/1,
 	 otp_5939/1, otp_6023/1, otp_6606/1, otp_7230/1,
 	 suffix/1, subtract/1]).
 
@@ -86,6 +87,7 @@ all() ->
      {group, funsort}, {group, ufunsort}, {group, sublist},
      {group, flatten}, {group, seq}, zip_unzip, zip_unzip3,
      zipwith, zipwith3, filter_partition, {group, tickets},
+     ifoldl, ifoldr, imap, ifilter, ipartition,
      suffix, subtract].
 
 groups() -> 
@@ -2568,6 +2570,103 @@ otp_6606(Config) when is_list(Config) ->
     L2 = [{I,I},{I,F},{F,I},{F,F}],
     ?line L2 = lists:keysort(1, L2),
     ?line L2 = lists:sort(L2),
+    ok.
+
+%% Test lists:ifoldl/3.
+ifoldl(Config) when is_list(Config) ->
+    Fold = fun(A, I, Acc) -> [{I, A}|Acc] end,
+    
+    ?line [] = lists:ifoldl(Fold, [], []),
+    ?line [{1,a}] = lists:ifoldl(Fold, [], [a]),
+    
+    %% Longer lists.
+    ?line Seq = lists:seq(43, 200),
+    ?line Res = lists:ifoldl(Fold, [], Seq),
+    ?line Seq = [A || {_,A} <- lists:reverse(Res)],
+    
+    %% Error cases.
+    BadFun = fun(A, B) -> {A, B} end,
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifoldl(badfun, [], [])),
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifoldl(BadFun, [], [])),
+    
+    ok.
+
+%% Test lists:ifoldr/3.
+ifoldr(Config) when is_list(Config) ->
+    Fold = fun(A, I, Acc) -> [{I, A}|Acc] end,
+    
+    ?line [] = lists:ifoldr(Fold, [], []),
+    ?line [{1,a}] = lists:ifoldr(Fold, [], [a]),
+    
+    %% Longer lists.
+    ?line Seq = lists:seq(43, 200),
+    ?line Res = lists:ifoldr(Fold, [], Seq),
+    ?line Seq = [A || {_,A} <- Res],
+    
+    %% Error cases.
+    BadFun = fun(A, B) -> {A, B} end,
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifoldr(badfun, [], [])),
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifoldr(BadFun, [], [])),
+    
+    ok.
+
+%% Test lists:imap/2.
+imap(Config) when is_list(Config) ->
+    Map = fun(A, I) -> A*I end,
+    
+    ?line [] = lists:imap(Map, []),
+    ?line [2, 4] = lists:imap(Map, [2, 2]),
+    
+    %% Longer lists.
+    ?line Seq = lists:seq(120, 300),
+    ?line Res = lists:imap(Map, Seq),
+    ?line [120, 242|_] = Res,
+    
+    %% Error cases.
+    BadFun = fun(_) -> 1 end,
+    ?line {'EXIT',{function_clause,_}} = (catch lists:imap(badfun, [])),
+    ?line {'EXIT',{function_clause,_}} = (catch lists:imap(BadFun, [])),
+    
+    ok.
+
+%% Test lists:ifilter/2
+ifilter(Config) when is_list(Config) ->
+    %% Filter even indexed elements.
+    Filter = fun(_, I) -> I rem 2 == 0 end,
+    
+    ?line [] = lists:ifilter(Filter, []),
+    ?line [b] = lists:ifilter(Filter, [a, b]),
+    
+    %% Longer lists.
+    ?line Seq = lists:seq(55, 150),
+    ?line Res = lists:ifilter(Filter, Seq),
+    ?line [56, 58, 60|_] = Res,
+    
+    %% Error cases.
+    BadFun = fun(_) -> 1 end,
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifilter(badfun, [])),
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ifilter(BadFun, [])),
+    
+    ok.
+
+%% Test lists:ipartition/2
+ipartition(Config) when is_list(Config) ->
+    %% Parititon every other element.
+    Partition = fun(_, I) -> I rem 2 == 1 end,
+    
+    ?line {[], []} = lists:ipartition(Partition, []),
+    ?line {[a], [b]} = lists:ipartition(Partition, [a, b]),
+    
+    %% Longer lists.
+    ?line Seq = lists:seq(55, 150),
+    ?line Res = lists:ipartition(Partition, Seq),
+    ?line {[55, 57, 59|_], [56, 58, 60|_]} = Res,
+    
+    %% Error cases.
+    BadFun = fun(_) -> 1 end,
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ipartition(badfun, [])),
+    ?line {'EXIT',{function_clause,_}} = (catch lists:ipartition(BadFun, [])),
+    
     ok.
 
 %% Test lists:suffix/2.

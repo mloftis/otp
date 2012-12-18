@@ -152,6 +152,17 @@
       </desc>
     </func>
     <func>
+      <name name="ifilter" arity="2"/>
+      <fsummary>Choose elements which satisfy a predicate that depends
+      on index</fsummary>
+      <desc>
+        <p><c><anno>List2</anno></c> is a list of all elements <c><anno>Elem</anno></c> in
+          <c><anno>List1</anno></c> for which
+          <c><anno>Pred</anno>(<anno>Elem</anno>, <anno>Index</anno>)</c> returns
+          <c>true</c>.</p>
+      </desc>
+    </func>
+    <func>
       <name name="flatlength" arity="1"/>
       <fsummary>Length of flattened deep list</fsummary>
       <desc>
@@ -211,6 +222,24 @@ flatmap(Fun, List1) ->
       </desc>
     </func>
     <func>
+      <name name="ifoldl" arity="3"/>
+      <fsummary>Fold a function over a list with the index</fsummary>
+      <desc>
+        <p>Calls <c><anno>Fun</anno>(<anno>Elem</anno>,
+        <anno>Index</anno>, <anno>AccIn</anno>)</c> on successive elements <c>A</c>
+          of <c><anno>List</anno></c>, starting with <c><anno>AccIn</anno> == <anno>Acc0</anno></c>.
+          <c><anno>Fun</anno>/3</c> must return a new accumulator which is passed to
+          the next call. The function returns the final value of
+          the accumulator. <c><anno>Acc0</anno></c> is returned if the list is empty.
+          For example:</p>
+        <pre>
+> <input>lists:ifoldl(fun(X, I, Sum) -> X + Sum * I end, 0, [1,2,3,4,5]).</input>
+325
+> <input>lists:ifoldl(fun(X, I, Prod) -> (X - I) * Prod end, 1, [1,2,3,4,5]).</input>
+0</pre>
+      </desc>
+    </func>
+    <func>
       <name name="foldr" arity="3"/>
       <fsummary>Fold a function over a list</fsummary>
       <desc>
@@ -225,6 +254,23 @@ flatmap(Fun, List1) ->
 3 2 1 void</pre>
         <p><c>foldl/3</c> is tail recursive and would usually be
           preferred to <c>foldr/3</c>.</p>
+      </desc>
+    </func>
+    <func>
+      <name name="ifoldr" arity="3"/>
+      <fsummary>Fold a function over a list with the index</fsummary>
+      <desc>
+        <p>Like <c>ifoldl/3</c>, but the list is traversed from right to
+          left. For example:</p>
+        <pre>
+> <input>P = fun(A, I, AccIn) -> io:format("~p,~p ", [A, I]), AccIn end.</input>
+#Fun&lt;erl_eval.18.9512347&gt;
+> <input>lists:ifoldl(P, void, [1,2,3]).</input>
+1,1 2,2 3,3 void
+> <input>lists:ifoldr(P, void, [1,2,3]).</input>
+3,3 2,2 1,1 void</pre>
+        <p><c>ifoldl/3</c> is tail recursive and would usually be
+          preferred to <c>ifoldr/3</c>.</p>
       </desc>
     </func>
     <func>
@@ -380,6 +426,14 @@ flatmap(Fun, List1) ->
       </desc>
     </func>
     <func>
+      <name name="imap" arity="2"/>
+      <fsummary>Map a function over a list with the index</fsummary>
+      <desc>
+        <p>Like <c>map/2</c> but takes a function of arity 2 where the
+        second argument is the index of the mapped element.</p>
+      </desc>
+    </func>
+    <func>
       <name name="mapfoldl" arity="3"/>
       <fsummary>Map and fold in one pass</fsummary>
       <desc>
@@ -522,6 +576,23 @@ c</pre>
 {[1,3,5,7],[2,4,6]}
 > <input>lists:partition(fun(A) -> is_atom(A) end, [a,b,1,c,d,2,3,4,e]).</input>
 {[a,b,c,d,e],[1,2,3,4]}</pre>
+        <p>See also <c>splitwith/2</c> for a different way to partition
+          a list.</p>
+      </desc>
+    </func>
+    <func>
+      <name name="ipartition" arity="2"/>
+      <fsummary>Partition a list into two lists based on a predicate
+      that depends on index</fsummary>
+      <desc>
+        <p>Like <c>partition/2</c> but the predicate accepts the
+        element index as its second element</p>
+        <p>Examples:</p>
+        <pre>
+> <input>lists:ipartition(fun(_, I) -> I rem 2 == 1 end, [1,2,1,2,1,2,1]).</input>
+{[1,1,1,1],[2,2,2]}
+> <input>lists:ipartition(fun(A, I) -> (is_atom(A)) or (I rem 2 == 0) end, [a,b,1,c,d,2,3,4,e]).</input>
+{[a,b,c,d,2,4,e],[1,3]}</pre>
         <p>See also <c>splitwith/2</c> for a different way to partition
           a list.</p>
       </desc>
