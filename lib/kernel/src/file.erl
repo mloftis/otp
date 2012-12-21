@@ -400,7 +400,7 @@ raw_write_file_info(Name, #file_info{} = Info) ->
 -spec open(File, Modes) -> {ok, IoDevice} | {error, Reason} when
       File :: Filename | iodata(),
       Filename :: name(),
-      Modes :: [mode()],
+      Modes :: [mode() | ram],
       IoDevice :: io_device(),
       Reason :: posix() | badarg | system_limit.
 
