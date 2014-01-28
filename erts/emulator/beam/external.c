@@ -2325,7 +2325,7 @@ enc_term_int(Process *p,ErtsAtomCacheMap *acmp, Eterm obj, byte* ep, Uint32 dfla
 	    GET_DOUBLE(obj, f);
 	    if (dflags & DFLAG_NEW_FLOATS) {
 		*ep++ = NEW_FLOAT_EXT;
-#ifdef WORDS_BIGENDIAN
+#if defined(WORDS_BIGENDIAN) || defined(DOUBLE_MIDDLE_ENDIAN)
 		put_int32(f.fw[0], ep);
 		ep += 4;
 		put_int32(f.fw[1], ep);
@@ -2804,7 +2804,7 @@ dec_term_atom_common:
 		volatile unsigned long *fpexnp = erts_get_current_fp_exception();
 #endif
 
-#ifdef WORDS_BIGENDIAN
+#if defined(WORDS_BIGENDIAN) || defined(DOUBLE_MIDDLE_ENDIAN)
 		ff.fw[0] = get_int32(ep);
 		ep += 4;
 		ff.fw[1] = get_int32(ep);
@@ -2970,7 +2970,7 @@ dec_term_atom_common:
 		n = get_int32(ep);
 		ep += 4;
 	    
-		if (n <= ERL_ONHEAP_BIN_LIMIT) {
+		if ((unsigned)n <= ERL_ONHEAP_BIN_LIMIT) {
 		    ErlHeapBin* hb = (ErlHeapBin *) hp;
 
 		    hb->thing_word = header_heap_bin(n);
@@ -3007,8 +3007,10 @@ dec_term_atom_common:
 
 		n = get_int32(ep);
 		bitsize = ep[4];
-		ep += 5;
-		if (n <= ERL_ONHEAP_BIN_LIMIT) {
+                if (((bitsize==0) != (n==0)) || bitsize > 8)
+                    goto error;
+                ep += 5;
+		if ((unsigned)n <= ERL_ONHEAP_BIN_LIMIT) {
 		    ErlHeapBin* hb = (ErlHeapBin *) hp;
 
 		    hb->thing_word = header_heap_bin(n);
@@ -3035,10 +3037,10 @@ dec_term_atom_common:
 		    hp += PROC_BIN_SIZE;
 		}
 		ep += n;
-		if (bitsize == 0) {
+		if (bitsize == 8 || n == 0) {
 		    *objp = bin;
 		} else {
-		    sb = (ErlSubBin *) hp;
+                    sb = (ErlSubBin *)hp;
 		    sb->thing_word = HEADER_SUB_BIN;
 		    sb->orig = bin;
 		    sb->size = n - 1;

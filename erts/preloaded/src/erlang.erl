@@ -1073,8 +1073,8 @@ module_loaded(_Module) ->
 %% monitor/2
 -spec monitor(Type, Item) -> MonitorRef when
       Type :: process,
-      Item :: pid() | Module | {Module, Node},
-      Module :: module(),
+      Item :: pid() | RegName | {RegName, Node},
+      RegName :: module(),
       Node :: node(),
       MonitorRef :: reference().
 monitor(_Type, _Item) ->
@@ -2099,13 +2099,14 @@ tuple_to_list(_Tuple) ->
          (creation) -> integer();
          (debug_compiled) -> boolean();
          (dist) -> binary();
+         (dist_buf_busy_limit) -> non_neg_integer();
          (dist_ctrl) -> {Node :: node(),
                          ControllingEntity :: port() | pid()};
          (driver_version) -> string();
 	 (dynamic_trace) -> none | dtrace | systemtap;
          (dynamic_trace_probes) -> boolean();
          (elib_malloc) -> false;
-         (dist_buf_busy_limit) -> non_neg_integer();
+         (ets_limit) -> pos_integer();
          (fullsweep_after) -> {fullsweep_after, non_neg_integer()};
          (garbage_collection) -> [{atom(), integer()}];
          (heap_sizes) -> [non_neg_integer()];
@@ -2891,22 +2892,23 @@ integer_to_binary(I, Base)
   when erlang:is_integer(I), erlang:is_integer(Base),
        Base >= 2, Base =< 1+$Z-$A+10 ->
     if I < 0 ->
-	    <<"$-",(integer_to_binary(-I, Base, []))/binary>>;
+	    <<$-,(integer_to_binary(-I, Base, <<>>))/binary>>;
        true ->
 	    integer_to_binary(I, Base, <<>>)
     end;
 integer_to_binary(I, Base) ->
     erlang:error(badarg, [I, Base]).
 
-integer_to_binary(0, _Base, R0) ->
-    R0;
 integer_to_binary(I0, Base, R0) ->
     D = I0 rem Base,
     I1 = I0 div Base,
-    if D >= 10 ->
-	    integer_to_binary(I1,Base,<<(D-10+$A),R0/binary>>);
-       true ->
-	    integer_to_binary(I1,Base,<<(D+$0),R0/binary>>)
+    R1 = if
+             D >= 10 -> <<(D-10+$A),R0/binary>>;
+             true -> <<(D+$0),R0/binary>>
+         end,
+    if
+        I1 =:= 0 -> R1;
+        true -> integer_to_binary(I1, Base, R1)
     end.
 
 %% erlang:flush_monitor_message/2 is for internal use only!
@@ -3497,6 +3499,8 @@ mk_res_list([]) ->
 mk_res_list([Alloc | Rest]) ->
     [{Alloc, []} | mk_res_list(Rest)].
 
+insert_instance(I, N, Rest) when erlang:is_atom(N) ->
+    [{N, I} | Rest];
 insert_instance(I, N, []) ->
     [{instance, N, I}];
 insert_instance(I, N, [{instance, M, _}|_] = Rest) when N < M ->

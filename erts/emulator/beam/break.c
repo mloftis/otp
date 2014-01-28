@@ -76,7 +76,10 @@ process_info(int to, void *to_arg)
     for (i = 0; i < max; i++) {
 	Process *p = erts_pix2proc(i);
 	if (p && p->i != ENULL) {
-	    if (!ERTS_PROC_IS_EXITING(p))
+	    /* Do not include processes with no heap,
+	     * they are most likely just created and has invalid data
+	     */
+	    if (!ERTS_PROC_IS_EXITING(p) && p->heap != NULL)
 		print_process_info(to, to_arg, p);
 	}
     }
@@ -754,7 +757,7 @@ erl_crash_dump_v(char *file, int line, char* fmt, va_list args)
 	return; /* Can't create the crash dump, skip it */
     
     time(&now);
-    erts_fdprintf(fd, "=erl_crash_dump:0.2\n%s", ctime(&now));
+    erts_fdprintf(fd, "=erl_crash_dump:0.3\n%s", ctime(&now));
 
     if (file != NULL)
        erts_fdprintf(fd, "The error occurred in file %s, line %d\n", file, line);

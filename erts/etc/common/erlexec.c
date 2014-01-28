@@ -103,12 +103,18 @@ static char *plusM_other_switches[] = {
     "ea",
     "ummc",
     "uycs",
+    "usac",
     "im",
     "is",
     "it",
+    "lpm",
     "Mamcbf",
     "Mrmcbf",
     "Mmcs",
+    "Mscs",
+    "Mscrfsd",
+    "Msco",
+    "Mscrpm",
     "Ye",
     "Ym",
     "Ytp",
@@ -799,17 +805,30 @@ int main(int argc, char **argv)
 		  case 'a':
 		  case 'A':
 		  case 'b':
+		  case 'e':
 		  case 'i':
 		  case 'n':
 		  case 'P':
 		  case 'Q':
-		  case 'S':
 		  case 't':
 		  case 'T':
 		  case 'R':
 		  case 'W':
 		  case 'K':
 		      if (argv[i][2] != '\0')
+			  goto the_default;
+		      if (i+1 >= argc)
+			  usage(argv[i]);
+		      argv[i][0] = '-';
+		      add_Eargs(argv[i]);
+		      add_Eargs(argv[i+1]);
+		      i++;
+		      break;
+		  case 'S':
+		      if (argv[i][2] == 'P') {
+			  if (argv[i][3] != '\0')
+			      goto the_default;
+		      } else if (argv[i][2] != '\0')
 			  goto the_default;
 		      if (i+1 >= argc)
 			  usage(argv[i]);
@@ -1119,7 +1138,9 @@ usage_aux(void)
 	  "[+l] [+M<SUBSWITCH> <ARGUMENT>] [+P MAX_PROCS] [+Q MAX_PORTS] "
 	  "[+R COMPAT_REL] "
 	  "[+r] [+rg READER_GROUPS_LIMIT] [+s SCHEDULER_OPTION] "
-	  "[+S NO_SCHEDULERS:NO_SCHEDULERS_ONLINE] [+T LEVEL] [+V] [+v] "
+	  "[+S NO_SCHEDULERS:NO_SCHEDULERS_ONLINE] "
+	  "[+SP PERCENTAGE_SCHEDULERS:PERCENTAGE_SCHEDULERS_ONLINE] "
+	  "[+T LEVEL] [+V] [+v] "
 	  "[+W<i|w>] [+z MISC_OPTION] [args ...]\n");
   exit(1);
 }

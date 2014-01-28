@@ -47,6 +47,7 @@ MODULES = \
 	ssl_payload_SUITE \
 	ssl_session_cache_SUITE	\
 	ssl_to_openssl_SUITE \
+	ssl_ECC_SUITE \
 	make_certs\
 	erl_make_certs
 
@@ -56,6 +57,7 @@ ERL_FILES = $(MODULES:%=%.erl)
 HRL_FILES =
 
 HRL_FILES_SRC = \
+	ssl_api.hrl\
 	ssl_internal.hrl\
 	ssl_alert.hrl \
 	tls_handshake.hrl \

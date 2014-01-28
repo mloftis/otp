@@ -32,11 +32,11 @@
 
 
 from_type(M,Typename) ->
-    case asn1_db:dbget(M,Typename) of
-	undefined -> 
+    case asn1_db:dbload(M) of
+	error ->
 	    {error,{not_found,{M,Typename}}};
-	Tdef when is_record(Tdef,typedef) ->
-	    Type = Tdef#typedef.typespec,
+	ok ->
+	    #typedef{typespec=Type} = asn1_db:dbget(M, Typename),
 	    from_type(M,[Typename],Type);
     Vdef when is_record(Vdef,valuedef) ->
         from_value(Vdef);
@@ -167,17 +167,16 @@ from_type_prim(M, D) ->
     case D#type.def of
 	'INTEGER' ->
 	    i_random(C);
-	{'INTEGER',NamedNumberList} ->
-	    NN = [X||{X,_} <- NamedNumberList],
-	    case NN of 
+	{'INTEGER',[_|_]=NNL} ->
+	    case C of
 		[] ->
-		    i_random(C);
+		    {N,_} = lists:nth(random(length(NNL)), NNL),
+		    N;
 		_ ->
-		    case C of
-			[] ->
-			    lists:nth(random(length(NN)),NN);
-			_ ->
-			    lists:nth((fun(0)->1;(X)->X end(i_random(C))),NN)
+		    V = i_random(C),
+		    case lists:keyfind(V, 2, NNL) of
+			false -> V;
+			{N,V} -> N
 		    end
 	    end;
 	Enum when is_tuple(Enum),element(1,Enum)=='ENUMERATED' ->

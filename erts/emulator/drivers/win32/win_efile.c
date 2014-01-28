@@ -772,6 +772,7 @@ efile_may_openfile(Efile_error* errInfo, char *name) {
     DWORD attr;
 
     if ((attr = GetFileAttributesW(wname)) == INVALID_FILE_ATTRIBUTES) {
+	errno = ENOENT;
 	return check_error(-1, errInfo);
     }
 
@@ -1215,7 +1216,7 @@ int flags;
     return 1;
 }
 
-
+
 /*
  * is_root_unc_name - returns TRUE if the argument is a UNC name specifying
  *      a root share.  That is, if it is of the form \\server\share\.

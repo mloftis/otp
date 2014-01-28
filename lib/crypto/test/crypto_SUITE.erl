@@ -143,7 +143,8 @@ app(Config) when is_list(Config) ->
 hash() ->
     [{doc, "Test all different hash functions"}].
 hash(Config) when is_list(Config) ->
-    {Type, Msgs, Digests} = proplists:get_value(hash, Config),
+    {Type, MsgsLE, Digests} = proplists:get_value(hash, Config),
+    Msgs = lazy_eval(MsgsLE),
     [LongMsg | _] = lists:reverse(Msgs),
     Inc = iolistify(LongMsg),
     [IncrDigest | _] = lists:reverse(Digests),
@@ -154,7 +155,8 @@ hash(Config) when is_list(Config) ->
 hmac() ->
      [{doc, "Test all different hmac functions"}].
 hmac(Config) when is_list(Config) ->
-    {Type, Keys, Data, Expected} = proplists:get_value(hmac, Config),
+    {Type, Keys, DataLE, Expected} = proplists:get_value(hmac, Config),
+    Data = lazy_eval(DataLE),
     hmac(Type, Keys, Data, Expected),
     hmac(Type, lists:map(fun iolistify/1, Keys), lists:map(fun iolistify/1, Data), Expected),
     hmac_increment(Type).
@@ -171,7 +173,8 @@ block(Config) when is_list(Config) ->
 stream() ->
       [{doc, "Test stream ciphers"}].
 stream(Config) when is_list(Config) ->
-    Streams = proplists:get_value(stream, Config),
+    Streams = lazy_eval(proplists:get_value(stream, Config)),
+
     lists:foreach(fun stream_cipher/1, Streams),
     lists:foreach(fun stream_cipher/1, stream_iolistify(Streams)),
     lists:foreach(fun stream_cipher_incment/1, stream_iolistify(Streams)).
@@ -795,7 +798,15 @@ rfc_4634_sha512_digests() ->
      hexstr2bin("8E959B75DAE313DA8CF4F72814FC143F8F7779C6EB9F7FA17299AEADB6889018501D289E4900F7E4331B99DEC4B5433AC7D329EEB6DD26545E96E55B874BE909")].
 
 long_msg() ->
-    lists:duplicate(1000000, $a).
+    fun() -> lists:duplicate(1000000, $a) end.
+
+%% Building huge terms (like long_msg/0) in init_per_group seems to cause
+%% test_server crash with 'no_answer_from_tc_supervisor' sometimes on some
+%% machines. Therefore lazy evaluation when test case has started.
+lazy_eval(F) when is_function(F) -> F();
+lazy_eval(Lst)  when is_list(Lst) -> lists:map(fun lazy_eval/1, Lst);
+lazy_eval(Tpl) when is_tuple(Tpl) -> list_to_tuple(lists:map(fun lazy_eval/1, tuple_to_list(Tpl)));
+lazy_eval(Term) -> Term.
 
 long_sha_digest() ->
     hexstr2bin("34aa973c" "d4c4daa4" "f61eeb2b" "dbad2731" "6534016f").
@@ -1245,7 +1256,7 @@ blowfish_ofb64() ->
 rc4() ->
     [{rc4, <<"apaapa">>, <<"Yo baby yo">>},
      {rc4, <<"apaapa">>, list_to_binary(lists:seq(0, 255))},
-     {rc4, <<"apaapa">>, lists:duplicate(1000000, $a)}
+     {rc4, <<"apaapa">>, long_msg()}
     ].
 
 aes_ctr() ->
@@ -1293,7 +1304,7 @@ aes_ctr() ->
 
        {aes_ctr,  hexstr2bin("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4"),
 	hexstr2bin("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"),
-	lists:duplicate(1000000, $a)}
+	long_msg()}
     ].
 
 rsa_plain() ->

@@ -866,13 +866,13 @@ Eterm store_external_or_ref_in_proc_(Process *, Eterm);
 Eterm store_external_or_ref_(Uint **, ErlOffHeap*, Eterm);
 
 #define NC_HEAP_SIZE(NC) \
- (ASSERT_EXPR(is_node_container((NC))), \
+ (ASSERT(is_node_container((NC))), \
   IS_CONST((NC)) ? 0 : (thing_arityval(*boxed_val((NC))) + 1))
 #define STORE_NC(Hpp, ETpp, NC) \
- (ASSERT_EXPR(is_node_container((NC))), \
+ (ASSERT(is_node_container((NC))), \
   IS_CONST((NC)) ? (NC) : store_external_or_ref_((Hpp), (ETpp), (NC)))
 #define STORE_NC_IN_PROC(Pp, NC) \
- (ASSERT_EXPR(is_node_container((NC))), \
+ (ASSERT(is_node_container((NC))), \
   IS_CONST((NC)) ? (NC) : store_external_or_ref_in_proc_((Pp), (NC)))
 
 /* duplicates from big.h */
@@ -937,7 +937,7 @@ char* Sint_to_buf(Sint, struct Sint_buf*);
 #define ERTS_IOLIST_OVERFLOW 1
 #define ERTS_IOLIST_TYPE 2
 
-Eterm buf_to_intlist(Eterm**, char*, size_t, Eterm); /* most callers pass plain char*'s */
+Eterm buf_to_intlist(Eterm**, const char*, size_t, Eterm); /* most callers pass plain char*'s */
 
 #define ERTS_IOLIST_TO_BUF_OVERFLOW	(~((ErlDrvSizeT) 0))
 #define ERTS_IOLIST_TO_BUF_TYPE_ERROR	(~((ErlDrvSizeT) 1))
@@ -1018,9 +1018,10 @@ Eterm erts_match_set_lint(Process *p, Eterm matchexpr);
 extern void erts_match_set_release_result(Process* p);
 
 enum erts_pam_run_flags {
-    ERTS_PAM_TMP_RESULT=0,
-    ERTS_PAM_COPY_RESULT=1,
-    ERTS_PAM_CONTIGUOUS_TUPLE=2
+    ERTS_PAM_TMP_RESULT=1,
+    ERTS_PAM_COPY_RESULT=2,
+    ERTS_PAM_CONTIGUOUS_TUPLE=4,
+    ERTS_PAM_IGNORE_TRACE_SILENT=8
 };
 extern Eterm erts_match_set_run(Process *p, Binary *mpsp, 
 				Eterm *args, int num_args,
@@ -1041,6 +1042,8 @@ extern void erts_match_prog_foreach_offheap(Binary *b,
 extern erts_driver_t vanilla_driver;
 extern erts_driver_t spawn_driver;
 extern erts_driver_t fd_driver;
+
+int erts_beam_jump_table(void);
 
 /* Should maybe be placed in erl_message.h, but then we get an include mess. */
 ERTS_GLB_INLINE Eterm *
@@ -1216,6 +1219,13 @@ erts_alloc_message_heap(Uint size,
 #  define UseTmpHeapNoproc(Size) /* Nothing */
 #  define UnUseTmpHeapNoproc(Size) /* Nothing */
 #endif /* HEAP_ON_C_STACK */
+
+ERTS_GLB_INLINE void dtrace_pid_str(Eterm pid, char *process_buf);
+ERTS_GLB_INLINE void dtrace_proc_str(Process *process, char *process_buf);
+ERTS_GLB_INLINE void dtrace_port_str(Port *port, char *port_buf);
+ERTS_GLB_INLINE void dtrace_fun_decode(Process *process,
+				       Eterm module, Eterm function, int arity,
+				       char *process_buf, char *mfa_buf);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 

@@ -83,6 +83,32 @@ main(_Rules) ->
     roundtrip('Seq4', #'Seq4'{seq43=SeqIn3},
 	      #'Seq4'{seq41=[],seq42=[],
 		      seq43=SeqIn3}),
+
+    roundtrip('Seq5', {'Seq5',true,[],77}),
+    roundtrip('Seq5', {'Seq5',true,[""],77}),
+    roundtrip('Seq5', {'Seq5',true,["a"],77}),
+    roundtrip('Seq5', {'Seq5',true,["ab"],77}),
+    roundtrip('Seq5', {'Seq5',true,["abc"],77}),
+
+    roundtrip('Seq6', {'Seq6',[],[],101}),
+    roundtrip('Seq6', {'Seq6',[],[7],101}),
+    roundtrip('Seq6', {'Seq6',[],[1,7],101}),
+    roundtrip('Seq6', {'Seq6',[1],[],101}),
+    roundtrip('Seq6', {'Seq6',[2],[7],101}),
+    roundtrip('Seq6', {'Seq6',[3],[1,7],101}),
+
+    roundtrip('Seq8', {'Seq8',[],37}),
+
+    roundtrip('Seq9', {'Seq9',true,[],97}),
+    roundtrip('Seq9', {'Seq9',true,[""],97}),
+    roundtrip('Seq9', {'Seq9',true,["x"],97}),
+    roundtrip('Seq9', {'Seq9',true,["xy"],97}),
+    roundtrip('Seq9', {'Seq9',true,["xyz"],97}),
+
+    roundtrip('Seq10', {'Seq10',true,[""],97}),
+    roundtrip('Seq10', {'Seq10',true,["a"],97}),
+    roundtrip('Seq10', {'Seq10',true,["a","b"],97}),
+    roundtrip('Seq10', {'Seq10',true,["a","b","c"],97}),
     
     roundtrip('SeqEmp', #'SeqEmp'{seq1=[#'Empty'{}]}),
 
@@ -123,15 +149,9 @@ roundtrip(T, V) ->
     roundtrip(T, V, V).
 
 roundtrip(Type, Val, Expected) ->
-    M = 'SeqOf',
-    {ok,Enc} = M:encode(Type, Val),
-    {ok,Expected} = M:decode(Type, Enc),
-    ok.
+    asn1_test_lib:roundtrip('SeqOf', Type, Val, Expected).
 
 xroundtrip(T1, T2, Val) ->
-    M = 'XSeqOf',
-    {ok,Enc} = M:encode(T1, Val),
-    {ok,Enc} = M:encode(T2, Val),
-    {ok,Val} = M:decode(T1, Enc),
-    {ok,Val} = M:decode(T2, Enc),
+    Enc = asn1_test_lib:roundtrip_enc('XSeqOf', T1, Val),
+    Enc = asn1_test_lib:roundtrip_enc('XSeqOf', T2, Val),
     ok.

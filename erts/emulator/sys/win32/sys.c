@@ -32,7 +32,7 @@
 #include "erl_threads.h"
 #include "../../drivers/win32/win_con.h"
 #include "erl_cpu_topology.h"
-
+#include <malloc.h>
 
 void erts_sys_init_float(void);
 
@@ -2912,6 +2912,30 @@ void erts_sys_free(ErtsAlcType_t t, void *x, void *p)
     free(p);
 }
 
+void *erts_sys_aligned_alloc(UWord alignment, UWord size)
+{
+    void *ptr;
+    ASSERT(alignment && (alignment & ~alignment) == 0); /* power of 2 */
+    ptr = _aligned_malloc((size_t) size, (size_t) alignment);
+    ASSERT(!ptr || (((UWord) ptr) & (alignment - 1)) == 0);
+    return ptr;
+}
+
+void erts_sys_aligned_free(UWord alignment, void *ptr)
+{
+    ASSERT(alignment && (alignment & ~alignment) == 0); /* power of 2 */
+    _aligned_free(ptr);
+}
+
+void *erts_sys_aligned_realloc(UWord alignment, void *ptr, UWord size, UWord old_size)
+{
+    void *new_ptr;
+    ASSERT(alignment && (alignment & ~alignment) == 0); /* power of 2 */
+    new_ptr = _aligned_realloc(ptr, (size_t) size, (size_t) alignment);
+    ASSERT(!new_ptr || (((UWord) new_ptr) & (alignment - 1)) == 0);
+    return new_ptr;
+}
+
 static Preload* preloaded = NULL;
 static unsigned* res_name = NULL;
 static int num_preloaded = 0;
@@ -3200,7 +3224,7 @@ erl_bin_write(buf, sz, max)
 }
 
 void
-erl_assert_error(char* expr, char* file, int line)
+erl_assert_error(const char* expr, const char* func, const char* file, int line)
 {   
     char message[1024];
 

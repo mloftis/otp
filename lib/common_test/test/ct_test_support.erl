@@ -36,7 +36,9 @@
 	 verify_events/3, verify_events/4, reformat/2, log_events/4,
 	 join_abs_dirs/2]).
 
--export([ct_test_halt/1]).
+-export([start_slave/3, slave_stop/1]).
+
+-export([ct_test_halt/1, ct_rpc/2]).
 
 -include_lib("kernel/include/file.hrl").
 
@@ -63,13 +65,16 @@ init_per_suite(Config, Level) ->
 	_ ->
 	    ok
     end,
-    
     start_slave(Config, Level).
 
-start_slave(Config,Level) ->
+start_slave(Config, Level) ->
+    start_slave(ct, Config, Level).
+
+start_slave(NodeName, Config, Level) ->
     [_,Host] = string:tokens(atom_to_list(node()), "@"),
-    test_server:format(0, "Trying to start ~s~n", ["ct@"++Host]),
-    case slave:start(Host, ct, []) of
+    test_server:format(0, "Trying to start ~s~n",
+		       [atom_to_list(NodeName)++"@"++Host]),
+    case slave:start(Host, NodeName, []) of
 	{error,Reason} ->
 	    test_server:fail(Reason);
 	{ok,CTNode} ->
@@ -77,7 +82,7 @@ start_slave(Config,Level) ->
 	    IsCover = test_server:is_cover(),
 	    if IsCover ->
 		    cover:start(CTNode);
-	       true->
+	       true ->
 		    ok
 	    end,
 
@@ -97,6 +102,14 @@ start_slave(Config,Level) ->
 	    test_server:format(Level, "Dirs added to code path (on ~w):~n",
 			       [CTNode]),
 	    [io:format("~s~n", [D]) || D <- PathDirs],
+	    
+	    case proplists:get_value(start_sasl, Config) of
+		true ->
+		    rpc:call(CTNode, application, start, [sasl]),
+		    test_server:format(Level, "SASL started on ~w~n", [CTNode]);
+		_ ->
+		    ok
+	    end,
 
 	    TraceFile = filename:join(DataDir, "ct.trace"),
 	    case file:read_file_info(TraceFile) of
@@ -370,6 +383,16 @@ wait_for_ct_stop(Retries, CTNode) ->
 	    timer:sleep(5000),
 	    wait_for_ct_stop(Retries-1, CTNode)
     end.
+
+%%%-----------------------------------------------------------------
+%%% ct_rpc/1
+ct_rpc({M,F,A}, Config) ->
+    CTNode = proplists:get_value(ct_node, Config),
+    Level = proplists:get_value(trace_level, Config),
+    test_server:format(Level, "~nCalling ~w:~w(~p) on ~p...",
+		       [M,F,A, CTNode]),
+    rpc:call(CTNode, M, F, A).
+
 
 %%%-----------------------------------------------------------------
 %%% EVENT HANDLING
@@ -669,8 +692,10 @@ locate({parallel,TEvs}, Node, Evs, Config) ->
 				  test_server:format("Found ~p!", [TEv]),
 				  {Done,RemEvs2,length(RemEvs2)}
 			  end;
-		     %% end_per_group auto skipped
-		     (TEv={TEH,tc_auto_skip,{M,end_per_group,R}}, {Done,RemEvs,_RemSize}) ->
+		     %% end_per_group auto- or user skipped
+		     (TEv={TEH,AutoOrUserSkip,{M,end_per_group,R}}, {Done,RemEvs,_RemSize})
+			when AutoOrUserSkip == tc_auto_skip;
+			     AutoOrUserSkip == tc_user_skip ->
 			  RemEvs1 = 
 			      lists:dropwhile(
 				fun({EH,#event{name=tc_auto_skip,
@@ -681,10 +706,18 @@ locate({parallel,TEvs}, Node, Evs, Config) ->
 					    match -> false;
 					    _ -> true
 					end;
+				   ({EH,#event{name=tc_user_skip,
+					       node=EvNode,
+					       data={Mod,end_per_group,Reason}}}) when
+				   EH == TEH, EvNode == Node, Mod == M ->
+					case match_data(R, Reason) of
+					    match -> false;
+					    _ -> true
+					end;
 				   ({EH,#event{name=stop_logging,
 					       node=EvNode,data=_}}) when
 					  EH == TEH, EvNode == Node ->
-					exit({tc_auto_skip_not_found,TEv});
+					exit({tc_auto_or_user_skip_not_found,TEv});
 				   (_) ->
 					true
 				end, RemEvs),
@@ -902,11 +935,18 @@ locate({shuffle,TEvs}, Node, Evs, Config) ->
 				  test_server:format("Found ~p!", [TEv]),
 				  {Done,RemEvs2,length(RemEvs2)}
 			  end;
-		     %% end_per_group auto skipped
-		     (TEv={TEH,tc_auto_skip,{M,end_per_group,R}}, {Done,RemEvs,_RemSize}) ->
+		     %% end_per_group auto-or user skipped
+		     (TEv={TEH,AutoOrUserSkip,{M,end_per_group,R}}, {Done,RemEvs,_RemSize})
+			when AutoOrUserSkip == tc_auto_skip;
+			     AutoOrUserSkip == tc_user_skip ->
 			  RemEvs1 = 
 			      lists:dropwhile(
 				fun({EH,#event{name=tc_auto_skip,
+					       node=EvNode,
+					       data={Mod,end_per_group,Reason}}}) when
+				   EH == TEH, EvNode == Node, Mod == M, Reason == R ->
+					false;
+				   ({EH,#event{name=tc_user_skip,
 					       node=EvNode,
 					       data={Mod,end_per_group,Reason}}}) when
 				   EH == TEH, EvNode == Node, Mod == M, Reason == R ->
@@ -1153,6 +1193,9 @@ log_events1([E={_EH,tc_done,{_M,{end_per_group,_GrName,Props},_R}} | Evs], Dev, 
 	    log_events1(Evs, Dev, Ind--"  ")
     end;
 log_events1([E={_EH,tc_auto_skip,{_M,end_per_group,_Reason}} | Evs], Dev, Ind) ->
+    io:format(Dev, "~s~p],~n", [Ind,E]),
+    log_events1(Evs, Dev, Ind--" ");
+log_events1([E={_EH,tc_user_skip,{_M,end_per_group,_Reason}} | Evs], Dev, Ind) ->
     io:format(Dev, "~s~p],~n", [Ind,E]),
     log_events1(Evs, Dev, Ind--" ");
 log_events1([E], Dev, Ind) ->
