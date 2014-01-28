@@ -25,60 +25,21 @@
 
 -record('Seq',{bool, boolCon, boolPri, boolApp, boolExpCon, boolExpPri, boolExpApp}).
 -record('Empty',{}).
+-record('Big', {os1,os2,os3}).
 
 main(_Rules) ->
-    
-    
-
-    ?line {ok,Bytes11} = 
-	asn1_wrapper:encode('SeqPrim','Seq',#'Seq'{bool = true,
-					       boolCon = true,
-					       boolPri = true,
-					       boolApp = true,
-					       boolExpCon = true,
-					       boolExpPri = true,
-					       boolExpApp = true}),
-    ?line {ok,{'Seq',true,true,true,true,true,true,true}} = 
-	asn1_wrapper:decode('SeqPrim','Seq',lists:flatten(Bytes11)),
-    
-    
-    
-    
-    ?line {ok,Bytes12} = 
-	asn1_wrapper:encode('SeqPrim','Seq',#'Seq'{bool = false,
-					       boolCon = false,
-					       boolPri = false,
-					       boolApp = false,
-					       boolExpCon = false,
-					       boolExpPri = false,
-					       boolExpApp = false}),
-    ?line {ok,{'Seq',false,false,false,false,false,false,false}} = 
-	asn1_wrapper:decode('SeqPrim','Seq',lists:flatten(Bytes12)),
-    
-    
-    
-    
-    ?line {ok,Bytes13} = 
-	asn1_wrapper:encode('SeqPrim','Seq',#'Seq'{bool = false,
-					       boolCon = true,
-					       boolPri = false,
-					       boolApp = true,
-					       boolExpCon = false,
-					       boolExpPri = true,
-					       boolExpApp = false}),
-    ?line {ok,{'Seq',false,true,false,true,false,true,false}} = 
-	asn1_wrapper:decode('SeqPrim','Seq',lists:flatten(Bytes13)),
-    
-    
-    
-    
-    
-    ?line {ok,Bytes21} = 
-	asn1_wrapper:encode('SeqPrim','Empty',#'Empty'{}),
-    ?line {ok,{'Empty'}} = 
-	asn1_wrapper:decode('SeqPrim','Empty',lists:flatten(Bytes21)),
-
-
-
+    roundtrip('Seq', #'Seq'{bool=true,boolCon=true,boolPri=true,boolApp=true,
+			    boolExpCon=true,boolExpPri=true,boolExpApp=true}),
+    roundtrip('Seq', #'Seq'{bool=false,boolCon=false,boolPri=false,
+			    boolApp=false,boolExpCon=false,
+			    boolExpPri=false,boolExpApp=false}),
+    roundtrip('Seq', #'Seq'{bool=false,boolCon=true,boolPri=false,boolApp=true,
+			    boolExpCon=false,boolExpPri=true,boolExpApp=false}),
+    roundtrip('Empty', #'Empty'{}),
+    roundtrip('Big', #'Big'{os1=lists:duplicate(120, 16#A5),
+			    os2=lists:duplicate(128, 16#A7),
+			    os3=lists:duplicate(17777, 16#F5)}),
     ok.
 
+roundtrip(Type, Value) ->
+    asn1_test_lib:roundtrip('SeqPrim', Type, Value).

@@ -1955,12 +1955,10 @@ expr({string,_Line,_S}, _Vt, St) -> {[],St};
 expr({nil,_Line}, _Vt, St) -> {[],St};
 expr({cons,_Line,H,T}, Vt, St) ->
     expr_list([H,T], Vt, St);
-expr({lc,_Line,E,Qs}, Vt0, St0) ->
-    {Vt,St} = handle_comprehension(E, Qs, Vt0, St0),
-    {vtold(Vt, Vt0),St};                      %Don't export local variables
-expr({bc,_Line,E,Qs}, Vt0, St0) ->
-    {Vt,St} = handle_comprehension(E, Qs, Vt0, St0),
-    {vtold(Vt,Vt0),St};			 %Don't export local variables
+expr({lc,_Line,E,Qs}, Vt, St) ->
+    handle_comprehension(E, Qs, Vt, St);
+expr({bc,_Line,E,Qs}, Vt, St) ->
+    handle_comprehension(E, Qs, Vt, St);
 expr({tuple,_Line,Es}, Vt, St) ->
     expr_list(Es, Vt, St);
 expr({record_index,Line,Name,Field}, _Vt, St) ->
@@ -2014,8 +2012,7 @@ expr({'fun',Line,Body}, Vt, St) ->
     %%No one can think funs export!
     case Body of
         {clauses,Cs} ->
-            {Bvt, St1} = fun_clauses(Cs, Vt, St),
-            {vtupdate(Bvt, Vt), St1};
+            fun_clauses(Cs, Vt, St);
         {function,F,A} ->
 	    %% BifClash - Fun expression
             %% N.B. Only allows BIFs here as well, NO IMPORTS!!
@@ -2033,6 +2030,15 @@ expr({'fun',Line,Body}, Vt, St) ->
 	    {Bvt, St1} = expr_list([M,F,A], Vt, St),
 	    {vtupdate(Bvt, Vt),St1}
     end;
+expr({named_fun,_,'_',Cs}, Vt, St) ->
+    fun_clauses(Cs, Vt, St);
+expr({named_fun,Line,Name,Cs}, Vt, St0) ->
+    Nvt0 = [{Name,{bound,unused,[Line]}}],
+    St1 = shadow_vars(Nvt0, Vt, 'named fun', St0),
+    Nvt1 = vtupdate(vtsubtract(Vt, Nvt0), Nvt0),
+    {Csvt,St2} = fun_clauses(Cs, Nvt1, St1),
+    {_,St3} = check_unused_vars(vtupdate(Csvt, Nvt0), [], St2),
+    {vtold(Csvt, Vt),St3};
 expr({call,_Line,{atom,_Lr,is_record},[E,{atom,Ln,Name}]}, Vt, St0) ->
     {Rvt,St1} = expr(E, Vt, St0),
     {Rvt,exist_record(Ln, Name, St1)};
@@ -2113,12 +2119,12 @@ expr({'try',Line,Es,Scs,Ccs,As}, Vt, St0) ->
     {Evt0,St1} = exprs(Es, Vt, St0),
     TryLine = {'try',Line},
     Uvt = vtunsafe(vtnames(vtnew(Evt0, Vt)), TryLine, []),
-    Evt1 = vtupdate(Uvt, vtupdate(Evt0, Vt)),
-    {Sccs,St2} = icrt_clauses(Scs++Ccs, TryLine, Evt1, St1),
+    Evt1 = vtupdate(Uvt, vtsubtract(Evt0, Uvt)),
+    {Sccs,St2} = icrt_clauses(Scs++Ccs, TryLine, vtupdate(Evt1, Vt), St1),
     Rvt0 = Sccs,
     Rvt1 = vtupdate(vtunsafe(vtnames(vtnew(Rvt0, Vt)), TryLine, []), Rvt0),
     Evt2 = vtmerge(Evt1, Rvt1),
-    {Avt0,St} = exprs(As, Evt2, St2),
+    {Avt0,St} = exprs(As, vtupdate(Evt2, Vt), St2),
     Avt1 = vtupdate(vtunsafe(vtnames(vtnew(Avt0, Vt)), TryLine, []), Avt0),
     Avt = vtmerge(Evt2, Avt1),
     {Avt,St};
@@ -2152,10 +2158,11 @@ expr({remote,Line,_M,_F}, _Vt, St) ->
 %%      {UsedVarTable,State}
 
 expr_list(Es, Vt, St) ->
-    foldl(fun (E, {Esvt,St0}) ->
-                  {Evt,St1} = expr(E, Vt, St0),
-                  {vtmerge(Evt, Esvt),St1}
-          end, {[],St}, Es).
+    {Vt1,St1} = foldl(fun (E, {Esvt,St0}) ->
+                              {Evt,St1} = expr(E, Vt, St0),
+                              {vtmerge_pat(Evt, Esvt),St1}
+                      end, {[],St}, Es),
+    {vtmerge(vtnew(Vt1, Vt), vtold(Vt1, Vt)),St1}.
 
 record_expr(Line, Rec, Vt, St0) ->
     St1 = warn_invalid_record(Line, Rec, St0),
@@ -2184,6 +2191,7 @@ is_valid_record(Rec) ->
         {lc, _, _, _} -> false;
         {record_index, _, _, _} -> false;
         {'fun', _, _} -> false;
+        {named_fun, _, _, _} -> false;
         _ -> true
     end.
 
@@ -2312,7 +2320,7 @@ check_fields(Fs, Name, Fields, Vt, St0, CheckFun) ->
 check_field({record_field,Lf,{atom,La,F},Val}, Name, Fields,
             Vt, St, Sfs, CheckFun) ->
     case member(F, Sfs) of
-        true -> {Sfs,{Vt,add_error(Lf, {redefine_field,Name,F}, St)}};
+        true -> {Sfs,{[],add_error(Lf, {redefine_field,Name,F}, St)}};
         false ->
             {[F|Sfs],
              case find_field(F, Fields) of
@@ -2845,7 +2853,9 @@ icrt_export(Csvt, Vt, In, St) ->
     Uvt = vtmerge(Evt, Unused),
     %% Make exported and unsafe unused variables unused in subsequent code:
     Vt2 = vtmerge(Uvt, vtsubtract(Vt1, Uvt)),
-    {Vt2,St}.
+    %% Forget about old variables which were not used:
+    Vt3 = vtmerge(vtnew(Vt2, Vt), vt_no_unused(vtold(Vt2, Vt))),
+    {Vt3,St}.
 
 handle_comprehension(E, Qs, Vt0, St0) ->
     {Vt1, Uvt, St1} = lc_quals(Qs, Vt0, St0),
@@ -2858,7 +2868,11 @@ handle_comprehension(E, Qs, Vt0, St0) ->
     %% Local variables that have not been shadowed.
     {_,St} = check_unused_vars(Vt2, Vt0, St4),
     Vt3 = vtmerge(vtsubtract(Vt2, Uvt), Uvt),
-    {Vt3,St}.
+    %% Don't export local variables.
+    Vt4 = vtold(Vt3, Vt0),
+    %% Forget about old variables which were not used.
+    Vt5 = vt_no_unused(Vt4),
+    {Vt5,St}.
 
 %% lc_quals(Qualifiers, ImportVarTable, State) ->
 %%      {VarTable,ShadowedVarTable,State}
@@ -2939,7 +2953,7 @@ fun_clauses(Cs, Vt, St) ->
                               {Cvt,St1} = fun_clause(C, Vt, St0),
                               {vtmerge(Cvt, Bvt0),St1}
                       end, {[],St#lint{recdef_top = false}}, Cs),
-    {Bvt,St2#lint{recdef_top = OldRecDef}}.
+    {vt_no_unused(vtold(Bvt, Vt)),St2#lint{recdef_top = OldRecDef}}.
 
 fun_clause({clause,_Line,H,G,B}, Vt0, St0) ->
     {Hvt,Binvt,St1} = head(H, Vt0, [], St0), % No imported pattern variables
@@ -3200,6 +3214,8 @@ vt_no_unsafe(Vt) -> [V || {_,{S,_U,_L}}=V <- Vt,
                               _ -> true
                           end].
 
+vt_no_unused(Vt) -> [V || {_,{_,U,_L}}=V <- Vt, U =/= unused].
+
 %% vunion(VarTable1, VarTable2) -> [VarName].
 %% vunion([VarTable]) -> [VarName].
 %% vintersection(VarTable1, VarTable2) -> [VarName].
@@ -3238,7 +3254,8 @@ modify_line(T, F0) ->
 
 %% Forms.
 modify_line1({function,F,A}, _Mf) -> {function,F,A};
-modify_line1({function,M,F,A}, _Mf) -> {function,M,F,A};
+modify_line1({function,M,F,A}, Mf) ->
+    {function,modify_line1(M, Mf),modify_line1(F, Mf),modify_line1(A, Mf)};
 modify_line1({attribute,L,record,{Name,Fields}}, Mf) ->
     {attribute,Mf(L),record,{Name,modify_line1(Fields, Mf)}};
 modify_line1({attribute,L,spec,{Fun,Types}}, Mf) ->

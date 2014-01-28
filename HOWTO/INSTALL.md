@@ -63,7 +63,7 @@ At Ericsson we have a "Daily Build and Test" that runs on:
     *   x86
 *   OpenBSD 5.0
     *   x86\_64
-*   Mac OS X 10.5.8 (Leopard), 10.6.0 (Snow Leopard), 10.7.3 (Lion)
+*   Mac OS X 10.5.8 (Leopard), 10.7.3 (Lion), 10.9 (Mavericks)
     *   x86
 *   Windows XP SP3, 2003, Vista, 7
     *   x86
@@ -217,6 +217,7 @@ Step 4: Run the following commands to configure the build:
 
     $ ./configure  [ options ]
 
+If you are building it from git you will need to run `autoconf` to generate configure file.
 By default, Erlang/OTP will be installed in `/usr/local/{bin,lib/erlang}`.
 To instead install in `<BaseDir>/{bin,lib/erlang}`, use the
 `--prefix=<BaseDir>` option.
@@ -288,6 +289,32 @@ Some of the available `configure` options are:
     implementation available, you typically want to try using the
     `libatomic_ops` library. It can be downloaded from
     <http://www.hpl.hp.com/research/linux/atomic_ops/>.
+*   `--disable-smp-require-native-atomics` - By default `configure` will
+    fail if an SMP runtime system is about to be built, and no implementation
+    for native atomic memory accesses can be found. If this happens, you are
+    encouraged to find a native atomic implementation that can be used, e.g.,
+    using `libatomic_ops`, but by passing `--disable-smp-require-native-atomics`
+    you can build using a fallback implementation based on mutexes or spinlocks.
+    Performance of the SMP runtime system will however suffer immensely without
+    an implementation for native atomic memory accesses.
+*   `--enable-static-{nifs,drivers}` - To allow usage of nifs and drivers on OSs
+    that do not support dynamic linking of libraries it is possible to statically
+    link nifs and drivers with the main Erlang VM binary. This is done by passing
+    a comma seperated list to the archives that you want to statically link. e.g.
+    `--enable-static-nifs=/home/$USER/my_nif.a`. The path has to be absolute and the
+    name of the archive has to be the same as the module, i.e. `my_nif` in the
+    example above. This is also true for drivers, but then it is the driver name
+    that has to be the same as the filename. You also have to define
+    `STATIC_ERLANG_{NIF,DRIVER}` when compiling the .o files for the nif/driver.
+    If your nif/driver depends on some other dynamic library, you now have to link
+    that to the Erlang VM binary. This is easily achived by passing `LIBS=-llibname`
+    to configure.
+*   `--without-$app` - By default all applications in Erlang/OTP will be included
+	in a release. If this is not wanted it is possible to specify that Erlang/OTP
+	should be compiled without that applications, i.e. `--without-wx`. There is
+	no automatic dependency handling inbetween applications. So if you disable
+	an application that another depends on, you also have to disable the
+	dependant application.
 
 If you or your system has special requirements please read the `Makefile` for
 additional configuration information.
@@ -688,17 +715,18 @@ Install MacPorts (<http://www.macports.org/>). Then:
 
 ### Building with wxErlang ###
 
-If you want to build the `wx` application, you will need to get wxWidgets-2.9.4 (or later)
-(`wxWidgets-2.9.4.tar.bz2` from <http://sourceforge.net/projects/wxwindows/files/2.9.4/>)
+If you want to build the `wx` application, you will need to get wxWidgets-3.0 (or later)
+(`wxWidgets-3.0.0.tar.bz2` from <http://sourceforge.net/projects/wxwindows/files/3.0.0/>)
 or get it from github:
     $ git clone git@github.com:wxWidgets/wxWidgets.git
 
-Be aware that the wxWidgets-2.9 branch is a development branch of wxWidgets and the MacOsX
-port still lags behind the other ports.
+Be aware that the wxWidgets-3.0 is a new release of wxWidgets, it is not as matured 
+as the old releases and the MacOsX port still lags behind the other ports.
 
-Configure and build wxMac:
+Configure and build wxWidgets:
 
-    $ ./configure --with-cocoa --prefix=/usr/local
+    $ ./configure --with-cocoa --prefix=/usr/local 
+      % Optional version and static libs: --with-macosx-version-min=10.9 --disable-shared
     $ make
     $ sudo make install
     $ export PATH=/usr/local/bin:$PATH
@@ -709,12 +737,11 @@ Check that you got the correct wx-config
 
 ### Finish up ###
 
-Build Erlang with the MacPorts GCC as the main compiler (using `clang`
-for the Objective-C Cocoa code in the `wx` application):
+Build Erlang
 
     $ export PATH=/usr/local/bin:$PATH
     $ cd $ERL_TOP
-    $ CC=/opt/local/bin/gcc-mp-4.5 CXX=/opt/local/bin/g++-mp-4.5 ./configure --enable-darwin-64bit
+    $ ./configure --enable-shared-zlib
     $ make
     $ sudo make install
 

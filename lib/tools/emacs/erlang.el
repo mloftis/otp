@@ -73,6 +73,8 @@
 ;;     M-x set-variable RET debug-on-error RET t RET
 ;;; Code:
 
+(eval-when-compile (require 'cl))
+
 ;; Variables:
 
 (defconst erlang-version "2.7"
@@ -620,7 +622,6 @@ resulting regexp is surrounded by \\_< and \\_>."
       "if"
       "let"
       "of"
-      "query"
       "receive"
       "try"
       "when")
@@ -697,6 +698,7 @@ resulting regexp is surrounded by \\_< and \\_>."
       "char"
       "cons"
       "deep_string"
+      "iodata"
       "iolist"
       "maybe_improper_list"
       "module"
@@ -708,6 +710,7 @@ resulting regexp is surrounded by \\_< and \\_>."
       "nonempty_list"
       "nonempty_improper_list"
       "nonempty_maybe_improper_list"
+      "nonempty_string"
       "no_return"
       "pos_integer"
       "string"
@@ -1025,7 +1028,7 @@ behaviour.")
 (defvar erlang-mode-syntax-table nil
   "Syntax table in use in Erlang-mode buffers.")
 
-
+
 
 (defvar erlang-skel-file "erlang-skels"
   "The type of erlang-skeletons that should be used, default
@@ -1272,7 +1275,7 @@ Unfortunately, XEmacs hasn't got support for a special Font
 Lock syntax table.  The effect is that `apply' in the atom
 `foo_apply' will be highlighted as a bif.")
 
-
+
 ;;; Avoid errors while compiling this file.
 
 ;; `eval-when-compile' is not defined in Emacs 18.  We define it as a
@@ -1321,7 +1324,7 @@ Lock syntax table.  The effect is that `apply' in the atom
 	(require 'tempo)
 	(require 'compile))))
 
-
+
 (defun erlang-version ()
   "Return the current version of Erlang mode."
   (interactive)
@@ -1516,7 +1519,7 @@ Other commands:
   (set (make-local-variable 'outline-level) (lambda () 1))
   (set (make-local-variable 'add-log-current-defun-function)
        'erlang-current-defun))
-
+
 (defun erlang-font-lock-init ()
   "Initialize Font Lock for Erlang mode."
   (or erlang-font-lock-syntax-table
@@ -1686,7 +1689,7 @@ plus variables, macros and records."
   (font-lock-mode 1)
   (funcall (symbol-function 'font-lock-fontify-buffer)))
 
-
+
 (defun erlang-menu-init ()
   "Init menus for Erlang mode.
 
@@ -1905,7 +1908,7 @@ Example:
 The new menu is returned.  No guarantee is given that the original
 menu is left unchanged."
   (delq entry items))
-
+
 ;; Man code:
 
 (defun erlang-man-init ()
@@ -2228,7 +2231,7 @@ For example:
 
 After installing the line, kill and restart Emacs, or restart Erlang
 mode with the command `M-x erlang-mode RET'.")))
-
+
 ;; Skeleton code:
 
 ;; This code is based on the package `tempo' which is part of modern
@@ -2349,7 +2352,7 @@ The first character of DD is space if the value is less than 10."
 	    (erlang-string-to-int (substring date 8 10))
 	    (substring date 4 7)
 	    (substring date -4))))
-
+
 ;; Indentation code:
 
 (defun erlang-indent-command (&optional whole-exp)
@@ -2598,9 +2601,15 @@ Value is list (stack token-start token-type in-what)."
 	     (if (save-excursion
 		   (goto-char (match-end 1))
 		   (erlang-skip-blank to)
+		   ;; Use erlang-variable-regexp here to look for an
+		   ;; optional variable name to match EEP37 named funs.
+		   (if (looking-at erlang-variable-regexp)
+		       (progn
+			 (goto-char (match-end 0))
+			 (erlang-skip-blank to)))
 		   (eq (following-char) ?\())
 		 (erlang-push (list 'fun token (current-column)) stack)))
-	    ((looking-at "\\(begin\\|query\\)[^_a-zA-Z0-9]")
+	    ((looking-at "\\(begin\\)[^_a-zA-Z0-9]")
 	     (erlang-push (list 'begin token (current-column)) stack))
 	    ;; Normal when case
 	    ;;((looking-at "when\\s ")
@@ -2813,6 +2822,9 @@ Return nil if inside string, t if in a comment."
 			     (- (+ previous erlang-argument-indent) 1))))
 		   	(t
 		   	 (nth 2 stack-top))))
+		 ((= (following-char) ?,)
+		  ;; a comma at the start of the line: line up with opening parenthesis.
+		  (nth 2 stack-top))
 		 (t 
 		  (goto-char (nth 1 stack-top))
 		  (let ((base (cond ((looking-at "[({]\\s *\\($\\|%\\)")
@@ -3033,7 +3045,7 @@ This assumes that the preceding expression is either simple
 \(i.e. an atom) or parenthesized."
   (save-excursion
     (or arg (setq arg 1))
-    (forward-sexp (- arg))
+    (ignore-errors (forward-sexp (- arg)))
     (let ((col (current-column)))
       (skip-chars-backward " \t")
       ;; Special hack to handle: (note line break)
@@ -3107,7 +3119,7 @@ This assumes that the preceding expression is either simple
 
 (defun erlang-at-keyword ()
   "Are we looking at an Erlang keyword which will increase indentation?"
-  (looking-at (concat "\\(when\\|if\\|fun\\|case\\|begin\\|query\\|"
+  (looking-at (concat "\\(when\\|if\\|fun\\|case\\|begin\\|"
 		      "of\\|receive\\|after\\|catch\\|try\\)[^_a-zA-Z0-9]")))
 
 (defun erlang-at-operator ()
@@ -3129,7 +3141,7 @@ commands."
 	   (skip-chars-backward " \t")
 	   (max (if (bolp) 0 (1+ (current-column)))
 		comment-column)))))
-
+
 ;;; Erlang movement commands
 
 ;; All commands below work as movement commands.  I.e. if the point is
@@ -3333,7 +3345,7 @@ With negative argument go towards the beginning of the buffer."
       (forward-sexp 1)
       (buffer-substring start (point)))))
 
-
+
 ;;; Miscellaneous
 
 (defun erlang-fill-paragraph (&optional justify)
@@ -3442,7 +3454,7 @@ at the end."
 	(error "Can't clone argument list"))
     (insert args)
     (set-mark p)))
-
+
 ;;; Information retrieval functions.
 
 (defun erlang-buffer-substring (beg end)
@@ -3640,6 +3652,10 @@ Normally used in conjunction with `erlang-beginning-of-clause', e.g.:
 			(setq cont nil))
 		       ((looking-at "\\s *\\($\\|%\\)")
 			(forward-line 1))
+		       ((looking-at "\\s *<<[^>]*?>>")
+			(when (zerop res)
+			  (setq res (+ 1 res)))
+			(goto-char (match-end 0)))
 		       ((looking-at "\\s *,")
 			(setq res (+ 1 res))
 			(goto-char (match-end 0)))
@@ -3769,7 +3785,7 @@ exported function."
       (store-match-data old-match-data)
       (member (cons name arity) exports))))
 
-
+
 ;;; Check module name
 
 ;; The function `write-file', bound to C-x C-w, calls
@@ -3832,7 +3848,7 @@ This function is normally placed in the hook `local-write-file-hooks'."
   ;; Must return nil since it is added to `local-write-file-hook'.
   nil)
 
-
+
 ;;; Electric functions.
 
 (defun erlang-electric-semicolon (&optional arg)
@@ -3921,7 +3937,7 @@ non-whitespace characters following the point on the current line."
   (self-insert-command arg)
 
   ;; Was this the second char in bit-syntax open (`<<')?
-  (unless (< (point) 2)
+  (unless (<= (point) 2)
     (save-excursion
       (backward-char 2)
       (when (and (eq (char-after (point)) ?<)
@@ -3942,7 +3958,7 @@ non-whitespace characters following the point on the current line."
 
 (defun erlang-after-bitsyntax-close ()
   "Return t if point is immediately after a bit-syntax close parenthesis (`>>')."
-  (and (>= (point) 2)
+  (and (>= (point) 3)
        (save-excursion
 	 (backward-char 2)
 	 (and (eq (char-after (point)) ?>)
@@ -4226,7 +4242,7 @@ This function is designed to be a member of a criteria list."
     (erlang-skip-blank)
     (looking-at "end[^_a-zA-Z0-9]")))
 
-
+
 ;; Erlang tags support which is aware of erlang modules.
 ;;
 ;; Not yet implemented under XEmacs.  (Hint:  The Emacs 19 etags
@@ -4536,7 +4552,7 @@ Tags can be given on the forms `tag', `module:', `module:tag'."
 		(or default (error "There is no default tag"))
 	      spec)))))
 
-
+
 ;; Search tag functions which are aware of Erlang modules.  The tactic
 ;; is to store new search functions into the local variables of the
 ;; TAGS buffers.  The variables are restored directly after the
@@ -4712,7 +4728,7 @@ for a tag on the form `module:tag'."
 	     (string= mod (erlang-get-module-from-file-name
 			   (file-of-tag)))))))
 
-
+
 ;;; Tags completion, Emacs 19 `etags' specific.
 ;;;
 ;;; The basic idea is to create a second completion table `erlang-tags-
@@ -4831,7 +4847,7 @@ about Erlang modules."
 		;; Only the first one will be stored in the table.
 		(intern (concat module ":") table))))))
     table))
-
+
 ;;;
 ;;; Prepare for other methods to run an Erlang slave process.
 ;;;
@@ -4913,7 +4929,7 @@ future, a new shell on an already running host will be started."
   (call-interactively erlang-next-error-function))
 
 
-
+
 ;;;
 ;;; Erlang Shell Mode -- Major mode used for Erlang shells.
 ;;;
@@ -5049,7 +5065,7 @@ Selects Comint or Compilation mode command as appropriate."
   (define-key map "\M-\C-m"  'compile-goto-error)
   (unless inferior-erlang-use-cmm
     (define-key map "\C-x`"    'erlang-next-error)))
-
+
 ;;;
 ;;; Inferior Erlang -- Run an Erlang shell as a subprocess.
 ;;;
@@ -5365,7 +5381,7 @@ There exists two workarounds for this bug:
   (inferior-erlang-prepare-for-input)
   (let* ((dir (inferior-erlang-compile-outdir))
 ;;; (file (file-name-nondirectory (buffer-file-name)))
-	 (noext (substring (buffer-file-name) 0 -4))
+	 (noext (substring (erlang-local-buffer-file-name) 0 -4))
 	 (opts (append (list (cons 'outdir dir))
 		       (if current-prefix-arg
 			   (list 'debug_info 'export_all))
@@ -5403,7 +5419,7 @@ unless the optional NO-DISPLAY is non-nil."
 (defun inferior-erlang-compile-outdir ()
   "Return the directory to compile the current buffer into."
   (let* ((buffer-dir (directory-file-name
-		      (file-name-directory (buffer-file-name))))
+		      (file-name-directory (erlang-local-buffer-file-name))))
 	 (parent-dir (directory-file-name
 		      (file-name-directory buffer-dir)))
          (ebin-dir (concat (file-name-as-directory parent-dir) "ebin"))
@@ -5421,11 +5437,11 @@ unless the optional NO-DISPLAY is non-nil."
 	(res (inferior-erlang-compute-erl-compile-command module-name opts))
 	ccfn-entry
 	done)
-    (if (not (null (buffer-file-name)))
+    (if (not (null (erlang-local-buffer-file-name)))
 	(while (and (not done) (not (null ccfn)))
 	  (setq ccfn-entry (car ccfn))
 	  (setq ccfn (cdr ccfn))
-	  (if (string-match (car ccfn-entry) (buffer-file-name))
+	  (if (string-match (car ccfn-entry) (erlang-local-buffer-file-name))
 	      (let ((c-fn (cdr ccfn-entry)))
 		(setq done t)
 		(if (not (null c-fn))
@@ -5457,7 +5473,7 @@ unless the optional NO-DISPLAY is non-nil."
 	 tmpvar tmpvar tmpvar2)))))
 
 (defun inferior-erlang-compute-leex-compile-command (module-name opts)
-  (let ((file-name        (buffer-file-name))
+  (let ((file-name        (erlang-local-buffer-file-name))
 	(erl-compile-expr (inferior-erlang-remove-any-trailing-dot
 			   (inferior-erlang-compute-erl-compile-command
 			    module-name opts))))
@@ -5476,7 +5492,7 @@ unless the optional NO-DISPLAY is non-nil."
 	    erl-compile-expr)))
 
 (defun inferior-erlang-compute-yecc-compile-command (module-name opts)
-  (let ((file-name        (buffer-file-name))
+  (let ((file-name        (erlang-local-buffer-file-name))
 	(erl-compile-expr (inferior-erlang-remove-any-trailing-dot
 			   (inferior-erlang-compute-erl-compile-command
 			    module-name opts))))
@@ -5527,6 +5543,36 @@ unless the optional NO-DISPLAY is non-nil."
       (setq strs (cdr strs)))
     result))
 
+(defun erlang-local-buffer-file-name ()
+  ;; When editing a file remotely via tramp,
+  ;; the buffer's file name may be for example
+  ;; "/ssh:host.example.com:/some/path/x.erl"
+  ;;
+  ;; If I try to compile such a file using C-c C-k, an
+  ;; erlang shell on the remote host is automatically
+  ;; started if needed, but for it to successfully compile
+  ;; the file, the c(...)  command that is sent must contain
+  ;; the file name "/some/path/x.erl" without the
+  ;; tramp-prefix "/ssh:host.example.com:".
+  (cond ((null (buffer-file-name))
+	 nil)
+	((erlang-tramp-remote-file-p)
+	 (erlang-tramp-get-localname))
+	(t
+	 (buffer-file-name))))
+
+(defun erlang-tramp-remote-file-p ()
+  (and (fboundp 'tramp-tramp-file-p)
+       (tramp-tramp-file-p (buffer-file-name))))
+
+(defun erlang-tramp-get-localname ()
+  (let ((tramp-info (tramp-dissect-file-name (buffer-file-name))))
+    (if (fboundp 'tramp-file-name-localname)
+	(tramp-file-name-localname tramp-info)
+      ;; In old versions of tramp, it was `tramp-file-name-path'
+      ;; instead of the newer `tramp-file-name-localname'
+      (tramp-file-name-path tramp-info))))
+
 ;; `next-error' only accepts buffers with major mode `compilation-mode'
 ;; or with the minor mode `compilation-minor-mode' activated.
 ;; (To activate the minor mode is out of the question, since it will
@@ -5561,7 +5607,7 @@ Capable of finding error messages in an inferior Erlang buffer."
   "Make the inferior Erlang change directory.
 The default is to go to the directory of the current buffer."
   (interactive)
-  (or dir (setq dir (file-name-directory (buffer-file-name))))
+  (or dir (setq dir (file-name-directory (erlang-local-buffer-file-name))))
   (or (inferior-erlang-running-p)
       (error "No inferior Erlang is running"))
   (inferior-erlang-display-buffer)

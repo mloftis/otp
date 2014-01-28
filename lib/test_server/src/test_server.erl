@@ -389,7 +389,6 @@ run_test_case_apply({CaseNum,Mod,Func,Args,Name,
 	    os:putenv("VALGRIND_LOGFILE_INFIX",atom_to_list(Mod)++"."++
 		      atom_to_list(Func)++"-")
     end,
-    test_server_h:testcase({Mod,Func,1}),
     ProcBef = erlang:system_info(process_count),
     Result = run_test_case_apply(Mod, Func, Args, Name, RunInit,
 				 TimetrapData),
@@ -916,6 +915,7 @@ run_test_case_eval(Mod, Func, Args0, Name, Ref, RunInit,
     put(test_server_logopts, LogOpts),
     Where = [{Mod,Func}],
     put(test_server_loc, Where),
+
     FWInitResult = test_server_sup:framework_call(init_tc,[Mod,Func,Args0],
 						  {ok,Args0}),
     set_tc_state(running),
@@ -925,7 +925,7 @@ run_test_case_eval(Mod, Func, Args0, Name, Ref, RunInit,
 		run_test_case_eval1(Mod, Func, Args, Name, RunInit, TCCallback);
 	    Error = {error,_Reason} ->
 		NewResult = do_end_tc_call(Mod,Func, {Error,Args0},
-					   {skip,{failed,Error}}),
+					   {auto_skip,{failed,Error}}),
 		{{0,NewResult},Where,[]};
 	    {fail,Reason} ->
 		Conf = [{tc_status,{failed,Reason}} | hd(Args0)],
@@ -936,9 +936,9 @@ run_test_case_eval(Mod, Func, Args0, Name, Ref, RunInit,
 	    Skip = {skip,_Reason} ->
 		NewResult = do_end_tc_call(Mod,Func, {Skip,Args0}, Skip),
 		{{0,NewResult},Where,[]};
-	    {auto_skip,Reason} ->
-		NewResult = do_end_tc_call(Mod,Func, {{skip,Reason},Args0},
-					   {skip,Reason}),
+	    AutoSkip = {auto_skip,_Reason} ->
+		%% special case where a conf case "pretends" to be skipped
+		NewResult = do_end_tc_call(Mod,Func, {AutoSkip,Args0}, AutoSkip),
 		{{0,NewResult},Where,[]}
 	end,
     exit({Ref,Time,Value,Loc,Opts}).
@@ -956,7 +956,8 @@ run_test_case_eval1(Mod, Func, Args, Name, RunInit, TCCallback) ->
 		    {{0,NewRes},Line,[]};
 		{skip_and_save,Reason,SaveCfg} ->
 		    Line = get_loc(),
-		    Conf = [{tc_status,{skipped,Reason}},{save_config,SaveCfg}|hd(Args)],
+		    Conf = [{tc_status,{skipped,Reason}},
+			    {save_config,SaveCfg}|hd(Args)],
 		    NewRes = do_end_tc_call(Mod,Func, {{skip,Reason},[Conf]},
 					    {skip,Reason}),
 		    {{0,NewRes},Line,[]};

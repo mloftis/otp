@@ -138,14 +138,15 @@ typedef struct {
 #define ERTS_DIST_EXT_SIZE(EDEP) \
   (sizeof(ErtsDistExternal) \
    - (((EDEP)->flags & ERTS_DIST_EXT_ATOM_TRANS_TAB) \
-      ? (ASSERT_EXPR(0 <= (EDEP)->attab.size \
-		     && (EDEP)->attab.size <= ERTS_ATOM_CACHE_SIZE), \
+      ? (ASSERT(0 <= (EDEP)->attab.size \
+		&& (EDEP)->attab.size <= ERTS_ATOM_CACHE_SIZE), \
 	 sizeof(Eterm)*(ERTS_ATOM_CACHE_SIZE - (EDEP)->attab.size)) \
       : sizeof(ErtsAtomTranslationTable)))
 
 typedef struct {
     byte *extp;
     int exttmp;
+    Uint extsize;
 } ErtsBinary2TermState;
 
 /* -------------------------------------------------------------------------- */

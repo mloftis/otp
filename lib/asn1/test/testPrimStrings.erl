@@ -19,7 +19,7 @@
 %%
 -module(testPrimStrings).
 
--export([bit_string/1]).
+-export([bit_string/2]).
 -export([octet_string/1]).
 -export([numeric_string/1]).
 -export([other_strings/1]).
@@ -28,10 +28,47 @@
 -export([bmp_string/1]).
 -export([times/1]).
 -export([utf8_string/1]).
+-export([fragmented/1]).
 
 -include_lib("test_server/include/test_server.hrl").
 
-bit_string(Rules) ->
+fragmented(Rules) ->
+    Lens = fragmented_lengths(),
+    fragmented_octet_string(Rules, Lens),
+    case Rules of
+	per ->
+	    %% NYI.
+	    ok;
+	_ ->
+	    fragmented_strings(Lens)
+    end.
+
+fragmented_strings(Lens) ->
+    Types = ['Ns','Ps','Ps11','Vis','IA5'],
+    [fragmented_strings(Len, Types) || Len <- Lens],
+    ok.
+
+fragmented_strings(Len, Types) ->
+    Str = make_ns_value(Len),
+    [roundtrip(Type, Str) || Type <- Types],
+    ok.
+
+make_ns_value(0) -> [];
+make_ns_value(N) -> [($0 - 1) + random:uniform(10)|make_ns_value(N-1)].
+
+fragmented_lengths() ->
+    K16 = 1 bsl 14,
+    K32 = K16 + K16,
+    K48 = K32 + K16,
+    K64 = K48 + K16,
+    [0,1,14,15,16,17,127,128,
+     K16-1,K16,K16+1,K16+(1 bsl 7)-1,K16+(1 bsl 7),K16+(1 bsl 7)+1,
+     K32-1,K32,K32+1,K32+(1 bsl 7)-1,K32+(1 bsl 7),K32+(1 bsl 7)+1,
+     K48-1,K48,K48+1,K48+(1 bsl 7)-1,K48+(1 bsl 7),K48+(1 bsl 7)+1,
+     K64-1,K64,K64+1,K64+(1 bsl 7)-1,K64+(1 bsl 7),K64+(1 bsl 7)+1,
+     K64+K16-1,K64+K16,K64+K16+1].
+
+bit_string(Rules, Opts) ->
     
     %%==========================================================
     %% Bs1 ::= BIT STRING
@@ -53,9 +90,10 @@ bit_string(Rules) ->
     bs_roundtrip('Bs1', [0,1,0,0,1,0]),
     bs_roundtrip('Bs1', [1,0,0,0,0,0,0,0,0]),
     bs_roundtrip('Bs1', [0,1,0,0,1,0,1,1,1,1,1,0,0,0,1,0,0,1,1]),
-    
-    case Rules of
-	ber ->
+
+
+    case {Rules,Opts} of
+	{ber,[]} ->
 	    bs_decode('Bs1', <<35,8,3,2,0,73,3,2,4,32>>,
 		      [0,1,0,0,1,0,0,1,0,0,1,0]),
 	    bs_decode('Bs1', <<35,9,3,2,0,234,3,3,7,156,0>>,
@@ -63,7 +101,17 @@ bit_string(Rules) ->
 	    bs_decode('Bs1', <<35,128,3,2,0,234,3,3,7,156,0,0,0>>,
 		      [1,1,1,0,1,0,1,0,1,0,0,1,1,1,0,0,0]);
 	_ ->
-	    ok
+	    %% DER, PER, UPER
+	    consistent_def_enc('BsDef1',
+			       [2#111101,
+				[1,0,1,1,1,1],
+				{2,<<2#101111:6,0:2>>},
+				<<2#101111:6>>]),
+	    consistent_def_enc('BsDef2',
+			       [[1,1,0,1, 1,1,1,0, 1,0,1,0, 1,1,0,1,
+				 1,0,1,1, 1,1,1,0, 1,1,1,0, 1,1,1,1],
+				{0,<<16#DEADBEEF:4/unit:8>>},
+				<<16#DEADBEEF:4/unit:8>>])
     end,
 
     
@@ -179,6 +227,24 @@ bit_string(Rules) ->
 	ber -> ok;
 	_ -> per_bs_strings()
     end.
+
+consistent_def_enc(Type, Vs) ->
+    M = 'PrimStrings',
+    {ok,Enc} = M:encode(Type, {Type,asn1_DEFAULT}),
+    {ok,Val} = M:decode(Type, Enc),
+
+    %% Ensure that the value has the correct format.
+    case {M:bit_string_format(),Val} of
+	{bitstring,{_,Bs}} when is_bitstring(Bs) -> ok;
+	{compact,{_,{Unused,Bin}}} when is_integer(Unused),
+					is_binary(Bin) -> ok;
+	{legacy,{_,Bs}} when is_list(Bs) -> ok
+    end,
+
+    %% All values should be recognized and encoded as the
+    %% the default value (i.e. not encoded at all).
+    _ = [{ok,Enc} = M:encode(Type, {Type,V}) || V <- Vs],
+    ok.
 
 %% The PER encoding rules requires that a BIT STRING with
 %% named positions should never have any trailing zeroes
@@ -311,8 +377,6 @@ octet_string(Rules) ->
 	    ok
     end,
 
-    fragmented_octet_string(Rules),
-
     S255 = lists:seq(1, 255),
     Strings = {type,true,"","1","12","345",true,
 	       S255,[$a|S255],[$a,$b|S255],397},
@@ -324,17 +388,7 @@ octet_string(Rules) ->
     p_roundtrip('OsVarStringsExt', ShortenedStrings),
     ok.
 
-fragmented_octet_string(Erules) ->
-    K16 = 1 bsl 14,
-    K32 = K16 + K16,
-    K48 = K32 + K16,
-    K64 = K48 + K16,
-    Lens = [0,1,14,15,16,17,127,128,
-	    K16-1,K16,K16+1,K16+(1 bsl 7)-1,K16+(1 bsl 7),K16+(1 bsl 7)+1,
-	    K32-1,K32,K32+1,K32+(1 bsl 7)-1,K32+(1 bsl 7),K32+(1 bsl 7)+1,
-	    K48-1,K48,K48+1,K48+(1 bsl 7)-1,K48+(1 bsl 7),K48+(1 bsl 7)+1,
-	    K64-1,K64,K64+1,K64+(1 bsl 7)-1,K64+(1 bsl 7),K64+(1 bsl 7)+1,
-	    K64+K16-1,K64+K16,K64+K16+1],
+fragmented_octet_string(Erules, Lens) ->
     Types = ['Os','OsFrag','OsFragExt'],
     [fragmented_octet_string(Erules, Types, L) || L <- Lens],
     fragmented_octet_string(Erules, ['FixedOs65536'], 65536),
@@ -697,14 +751,10 @@ p_roundtrip(Type, Value0) ->
     roundtrip(Type, Value).
 
 roundtrip(Type, Value) ->
-    {ok,Encoded} = 'PrimStrings':encode(Type, Value),
-    {ok,Value} = 'PrimStrings':decode(Type, Encoded),
-    ok.
+    roundtrip(Type, Value, Value).
 
 roundtrip(Type, Value, Expected) ->
-    {ok,Encoded} = 'PrimStrings':encode(Type, Value),
-    {ok,Expected} = 'PrimStrings':decode(Type, Encoded),
-    ok.
+    asn1_test_lib:roundtrip('PrimStrings', Type, Value, Expected).
 
 bs_roundtrip(Type, Value) ->
     bs_roundtrip(Type, Value, Value).

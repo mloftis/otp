@@ -30,6 +30,40 @@
   </header>
   <p>This document describes the changes made to HiPE.</p>
 
+<section><title>Hipe 3.10.2.2</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Fixed a dialyzer crash when using remote types in the
+	    tail position of a maybe_improper_list/2 type. Thanks to
+	    Kostis Sagonas</p>
+          <p>
+	    Own Id: OTP-11374</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>Hipe 3.10.2.1</title>
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    The encoding of the <c>notes.xml</c> file has been
+	    changed from latin1 to utf-8 to avoid future merge
+	    problems.</p>
+          <p>
+	    Own Id: OTP-11310</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
 <section><title>Hipe 3.10.2</title>
 
     <section><title>Improvements and New Features</title>
@@ -37,7 +71,7 @@
         <item>
           <p>
 	    Fix the title of hipe_app documentation page. Thanks to
-	    Loïc Hoguin.</p>
+	    LoÃ¯c Hoguin.</p>
           <p>
 	    Own Id: OTP-10904</p>
         </item>

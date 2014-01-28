@@ -25,8 +25,165 @@
     <file>notes.xml</file>
   </header>
   <p>This document describes the changes made to the SSL application.</p>
-  
-  <section><title>SSL 5.3</title>
+  <section><title>SSL 5.3.3</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Add missing validation of the server_name_indication
+	    option and test for its explicit use. It was not possible
+	    to set or disable the default server_name_indication as
+	    the validation of the option was missing.</p>
+          <p>
+	    Own Id: OTP-11567</p>
+        </item>
+        <item>
+          <p>
+	    Elliptic curve selection in server mode now properly
+	    selects a curve suggested by the client, if possible, and
+	    the fallback alternative is changed to a more widely
+	    supported curve.</p>
+          <p>
+	    Own Id: OTP-11575</p>
+        </item>
+        <item>
+          <p>
+	    Bug in the TLS hello extension handling caused the server
+	    to behave as it did not understand secure renegotiation.</p>
+          <p>
+	    Own Id: OTP-11595</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>SSL 5.3.2</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Honors the clients advertised support of elliptic curves
+	    and no longer sends incorrect elliptic curve extension in
+	    server hello.</p>
+          <p>
+	    Own Id: OTP-11370</p>
+        </item>
+        <item>
+          <p>
+	    Fix initialization of DTLS fragment reassembler, in
+	    previously contributed code, for future support of DTLS .
+	    Thanks to Andreas Schultz.</p>
+          <p>
+	    Own Id: OTP-11376</p>
+        </item>
+        <item>
+          <p>
+	    Corrected type error in client_preferred_next_protocols
+	    documentation. Thanks to Julien Barbot.</p>
+          <p>
+	    Own Id: OTP-11457</p>
+        </item>
+      </list>
+    </section>
+
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    TLS code has been refactored to prepare for future DTLS
+	    support. Also some DTLS code is in place but not yet
+	    runnable, some of it contributed by Andreas Schultz and
+	    some of it written by the OTP team. Thanks to to Andreas
+	    for his participation.</p>
+          <p>
+	    Own Id: OTP-11292</p>
+        </item>
+        <item>
+          <p>
+	    Remove extraneous dev debug code left in the close
+	    function. Thanks to Ken Key.</p>
+          <p>
+	    Own Id: OTP-11447</p>
+        </item>
+        <item>
+          <p>
+	    Add SSL Server Name Indication (SNI) client support.
+	    Thanks to Julien Barbot.</p>
+          <p>
+	    Own Id: OTP-11460</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>SSL 5.3.1</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Setopts during renegotiation caused the renegotiation to
+	    be unsuccessful.</p>
+          <p>
+	    If calling setopts during a renegotiation the FSM state
+	    might change during the handling of the setopts messages,
+	    this is now handled correctly.</p>
+          <p>
+	    Own Id: OTP-11228</p>
+        </item>
+        <item>
+          <p>
+	    Now handles signature_algorithm field in digitally_signed
+	    properly with proper defaults. Prior to this change some
+	    elliptic curve cipher suites could fail reporting the
+	    error "bad certificate".</p>
+          <p>
+	    Own Id: OTP-11229</p>
+        </item>
+        <item>
+          <p>
+	    The code emulating the inet header option was changed in
+	    the belief that it made it inet compatible. However the
+	    testing is a bit hairy as the inet option is actually
+	    broken, now the tests are corrected and the header option
+	    should work in the same broken way as inet again,
+	    preferably use the bitsyntax instead.</p>
+          <p>
+	    Own Id: OTP-11230</p>
+        </item>
+      </list>
+    </section>
+
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    Make the ssl manager name for erlang distribution over
+	    SSL/TLS relative to the module name of the ssl_manager.</p>
+          <p>
+	    This can be beneficial when making tools that rename
+	    modules for internal processing in the tool.</p>
+          <p>
+	    Own Id: OTP-11255</p>
+        </item>
+        <item>
+          <p>
+	    Add documentation regarding log_alert option.</p>
+          <p>
+	    Own Id: OTP-11271</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>SSL 5.3</title>
 
     <section><title>Fixed Bugs and Malfunctions</title>
       <list>
@@ -100,7 +257,6 @@
 </section>
 
 <section><title>SSL 5.2.1</title>
-
     <section><title>Improvements and New Features</title>
       <list>
         <item>
@@ -126,9 +282,20 @@
     </section>
 
 </section>
-
+<section><title>SSL 5.1.2.1</title>
+<section><title>Improvements and New Features</title>
+<list>
+  <item>
+    <p>
+      Make log_alert configurable as option in ssl, SSLLogLevel
+    added as option to inets conf file</p>
+    <p>
+    Own Id: OTP-11259</p>
+  </item>
+</list>
+</section>
+</section>
 <section><title>SSL 5.2</title>
-
     <section><title>Fixed Bugs and Malfunctions</title>
       <list>
         <item>

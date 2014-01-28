@@ -1,7 +1,7 @@
 /*
  * %CopyrightBegin%
  *
- * Copyright Ericsson AB 1996-2013. All Rights Reserved.
+ * Copyright Ericsson AB 1996-2014. All Rights Reserved.
  *
  * The contents of this file are subject to the Erlang Public License,
  * Version 1.1, (the "License"); you may not use this file except in
@@ -185,39 +185,41 @@ erts_set_hole_marker(Eterm* ptr, Uint sz)
  * Helper function for the ESTACK macros defined in global.h.
  */
 void
-erl_grow_stack(ErtsAlcType_t a_type, Eterm** start, Eterm** sp, Eterm** end)
+erl_grow_estack(ErtsEStack* s, Eterm* default_estack)
 {
-    Uint old_size = (*end - *start);
+    Uint old_size = (s->end - s->start);
     Uint new_size = old_size * 2;
-    Uint sp_offs = *sp - *start;
-    if (new_size > 2 * DEF_ESTACK_SIZE) {
-	*start = erts_realloc(a_type, (void *) *start, new_size*sizeof(Eterm));
+    Uint sp_offs = s->sp - s->start;
+    if (s->start != default_estack) {
+	s->start = erts_realloc(s->alloc_type, s->start,
+				new_size*sizeof(Eterm));
     } else {
-	Eterm* new_ptr = erts_alloc(a_type, new_size*sizeof(Eterm));
-	sys_memcpy(new_ptr, *start, old_size*sizeof(Eterm));
-	*start = new_ptr;
+	Eterm* new_ptr = erts_alloc(s->alloc_type, new_size*sizeof(Eterm));
+	sys_memcpy(new_ptr, s->start, old_size*sizeof(Eterm));
+	s->start = new_ptr;
     }
-    *end = *start + new_size;
-    *sp = *start + sp_offs;
+    s->end = s->start + new_size;
+    s->sp = s->start + sp_offs;
 }
 /*
- * Helper function for the ESTACK macros defined in global.h.
+ * Helper function for the WSTACK macros defined in global.h.
  */
 void
-erl_grow_wstack(ErtsAlcType_t a_type, UWord** start, UWord** sp, UWord** end)
+erl_grow_wstack(ErtsWStack* s, UWord* default_wstack)
 {
-    Uint old_size = (*end - *start);
+    Uint old_size = (s->wend - s->wstart);
     Uint new_size = old_size * 2;
-    Uint sp_offs = *sp - *start;
-    if (new_size > 2 * DEF_ESTACK_SIZE) {
-	*start = erts_realloc(a_type, (void *) *start, new_size*sizeof(UWord));
+    Uint sp_offs = s->wsp - s->wstart;
+    if (s->wstart != default_wstack) {
+	s->wstart = erts_realloc(s->alloc_type, s->wstart,
+				 new_size*sizeof(UWord));
     } else {
-	UWord* new_ptr = erts_alloc(a_type, new_size*sizeof(UWord));
-	sys_memcpy(new_ptr, *start, old_size*sizeof(UWord));
-	*start = new_ptr;
+	UWord* new_ptr = erts_alloc(s->alloc_type, new_size*sizeof(UWord));
+	sys_memcpy(new_ptr, s->wstart, old_size*sizeof(UWord));
+	s->wstart = new_ptr;
     }
-    *end = *start + new_size;
-    *sp = *start + sp_offs;
+    s->wend = s->wstart + new_size;
+    s->wsp = s->wstart + sp_offs;
 }
 
 /* CTYPE macros */
@@ -576,8 +578,8 @@ erts_bld_2tup_list(Uint **hpp, Uint *szp,
 }
 
 Eterm
-erts_bld_atom_uint_2tup_list(Uint **hpp, Uint *szp,
-			     Sint length, Eterm atoms[], Uint uints[])
+erts_bld_atom_uword_2tup_list(Uint **hpp, Uint *szp,
+                              Sint length, Eterm atoms[], UWord uints[])
 {
     Sint i;
     Eterm res = THE_NON_VALUE;
@@ -1319,7 +1321,7 @@ make_hash2(Eterm term)
 	    {
 		FloatDef ff;
 		GET_DOUBLE(term, ff);
-#if defined(WORDS_BIGENDIAN)
+#if defined(WORDS_BIGENDIAN) || defined(DOUBLE_MIDDLE_ENDIAN)
 		UINT32_HASH_2(ff.fw[0], ff.fw[1], HCONST_12);
 #else
 		UINT32_HASH_2(ff.fw[1], ff.fw[0], HCONST_12);
@@ -1675,7 +1677,7 @@ static int do_send_to_logger(Eterm tag, Eterm gleader, char *buf, int len)
 	p = erts_whereis_process(NULL, 0, am_error_logger, 0, 0);
 	if (p) {
 	    erts_aint32_t state = erts_smp_atomic32_read_acqb(&p->state);
-	    if (state & ERTS_PSFLG_RUNNING)
+	    if (state & (ERTS_PSFLG_RUNNING|ERTS_PSFLG_RUNNING_SYS))
 		p = NULL;
 	}
     }
@@ -2846,7 +2848,7 @@ pop_next:
     return 0;
 
 not_equal:
-    DESTROY_ESTACK(stack);
+    DESTROY_WSTACK(stack);
     return j;
 
 #undef CMP_NODES
@@ -2983,7 +2985,7 @@ char* Sint_to_buf(Sint n, struct Sint_buf *buf)
 */
 
 Eterm
-buf_to_intlist(Eterm** hpp, char *buf, size_t len, Eterm tail)
+buf_to_intlist(Eterm** hpp, const char *buf, size_t len, Eterm tail)
 {
     Eterm* hp = *hpp;
     size_t i = len;
@@ -3021,6 +3023,14 @@ buf_to_intlist(Eterm** hpp, char *buf, size_t len, Eterm tail)
 ** Return remaining bytes in buffer on success
 **        ERTS_IOLIST_TO_BUF_OVERFLOW on overflow
 **        ERTS_IOLIST_TO_BUF_TYPE_ERROR on type error (including that result would not be a whole number of bytes)
+**
+** Note! 
+** Do not detect indata errors in this fiunction that are not detected by erts_iolist_size!
+**
+** A caller should be able to rely on a successful return from erts_iolist_to_buf
+** if erts_iolist_size is previously successfully called and erts_iolist_to_buf 
+** is called with a buffer at least as large as the value given by erts_iolist_size.
+** 
 */
 
 ErlDrvSizeT erts_iolist_to_buf(Eterm obj, char* buf, ErlDrvSizeT alloced_len)
@@ -3127,6 +3137,11 @@ ErlDrvSizeT erts_iolist_to_buf(Eterm obj, char* buf, ErlDrvSizeT alloced_len)
 
 /*
  * Return 0 if successful, and non-zero if unsuccessful.
+ *
+ * It is vital that if erts_iolist_to_buf would return an error for
+ * any type of term data, this function should do so as well.
+ * Any input term error detected in erts_iolist_to_buf should also
+ * be detected in this function!
  */
 int erts_iolist_size(Eterm obj, ErlDrvSizeT* sizep)
 {
@@ -3466,6 +3481,291 @@ erts_free_read_env(void *value)
 	erts_free(ERTS_ALC_T_TMP, value);
 }
 
+
+typedef struct {
+    size_t sz;
+    char *ptr;
+} ErtsEmuArg;
+
+typedef struct {
+    int argc;
+    ErtsEmuArg *arg;
+    size_t no_bytes;
+} ErtsEmuArgs;
+
+ErtsEmuArgs saved_emu_args = {0};
+
+void
+erts_save_emu_args(int argc, char **argv)
+{
+#ifdef DEBUG
+    char *end_ptr;
+#endif
+    char *ptr;
+    int i;
+    size_t arg_sz[100];
+    size_t size;
+
+    ASSERT(!saved_emu_args.argc);
+
+    size = sizeof(ErtsEmuArg)*argc;
+    for (i = 0; i < argc; i++) {
+	size_t sz = sys_strlen(argv[i]);
+	if (i < sizeof(arg_sz)/sizeof(arg_sz[0]))
+	    arg_sz[i] = sz;
+	size += sz+1;
+    } 
+    ptr = (char *) malloc(size);
+#ifdef DEBUG
+    end_ptr = ptr + size;
+#endif
+    saved_emu_args.arg = (ErtsEmuArg *) ptr;
+    ptr += sizeof(ErtsEmuArg)*argc;
+    saved_emu_args.argc = argc;
+    saved_emu_args.no_bytes = 0;
+    for (i = 0; i < argc; i++) {
+	size_t sz;
+	if (i < sizeof(arg_sz)/sizeof(arg_sz[0]))
+	    sz = arg_sz[i];
+	else
+	    sz = sys_strlen(argv[i]);
+	saved_emu_args.arg[i].ptr = ptr;
+	saved_emu_args.arg[i].sz = sz;
+	saved_emu_args.no_bytes += sz;
+	ptr += sz+1;
+	sys_strcpy(saved_emu_args.arg[i].ptr, argv[i]);
+    }
+    ASSERT(ptr == end_ptr);
+}
+
+Eterm
+erts_get_emu_args(Process *c_p)
+{
+#ifdef DEBUG
+    Eterm *end_hp;
+#endif
+    int i;
+    Uint hsz;
+    Eterm *hp, res;
+
+    hsz = saved_emu_args.no_bytes*2;
+    hsz += saved_emu_args.argc*2;
+
+    hp = HAlloc(c_p, hsz);
+#ifdef DEBUG
+    end_hp = hp + hsz;
+#endif
+    res = NIL;
+
+    for (i = saved_emu_args.argc-1; i >= 0; i--) {
+    Eterm arg = buf_to_intlist(&hp,
+				   saved_emu_args.arg[i].ptr,
+				   saved_emu_args.arg[i].sz,
+				   NIL);
+	res = CONS(hp, arg, res);
+	hp += 2;
+    }
+
+    ASSERT(hp == end_hp);
+
+    return res;
+}
+
+
+Eterm
+erts_get_ethread_info(Process *c_p)
+{
+    Uint sz, *szp;
+    Eterm res, *hp, **hpp, *end_hp = NULL;
+
+    sz = 0;
+    szp = &sz;
+    hpp = NULL;
+
+    while (1) {
+	Eterm tup, list, name;
+#if defined(ETHR_NATIVE_ATOMIC32_IMPL)	  \
+    || defined(ETHR_NATIVE_ATOMIC64_IMPL)	\
+    || defined(ETHR_NATIVE_DW_ATOMIC_IMPL)
+	char buf[1024];
+	int i;
+	char **str;
+#endif
+
+	res = NIL;
+
+#ifdef ETHR_X86_MEMBAR_H__
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp, "sse2"),
+#ifdef ETHR_X86_RUNTIME_CONF_HAVE_SSE2__
+			     erts_bld_string(hpp, szp,
+					     (ETHR_X86_RUNTIME_CONF_HAVE_SSE2__
+					      ? "yes" : "no"))
+#else
+			     erts_bld_string(hpp, szp, "yes")
+#endif
+	    );
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp,
+					     "x86"
+#ifdef ARCH_64
+					     "_64"
+#endif
+					     " OOO"),
+			     erts_bld_string(hpp, szp,
+#ifdef ETHR_X86_OUT_OF_ORDER
+					     "yes"
+#else
+					     "no"
+#endif
+				 ));
+
+	res = erts_bld_cons(hpp, szp, tup, res);
+#endif
+
+#ifdef ETHR_SPARC_V9_MEMBAR_H__
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp, "Sparc V9"),
+			     erts_bld_string(hpp, szp,
+#if defined(ETHR_SPARC_TSO)
+					     "TSO"
+#elif defined(ETHR_SPARC_PSO)
+					     "PSO"
+#elif defined(ETHR_SPARC_RMO)
+					     "RMO"
+#else
+					     "undefined"
+#endif
+				 ));
+
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+#endif
+
+#ifdef ETHR_PPC_MEMBAR_H__
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp, "lwsync"),
+			     erts_bld_string(hpp, szp,
+#if defined(ETHR_PPC_HAVE_LWSYNC)
+					     "yes"
+#elif defined(ETHR_PPC_HAVE_NO_LWSYNC)
+					     "no"
+#elif defined(ETHR_PPC_RUNTIME_CONF_HAVE_LWSYNC__)
+					     ETHR_PPC_RUNTIME_CONF_HAVE_LWSYNC__ ? "yes" : "no"
+#else
+					     "undefined"
+#endif
+				 ));
+
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+#endif
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp, "Native rw-spinlocks"),
+#ifdef ETHR_NATIVE_RWSPINLOCK_IMPL
+			     erts_bld_string(hpp, szp, ETHR_NATIVE_RWSPINLOCK_IMPL)
+#else
+			     erts_bld_string(hpp, szp, "no")
+#endif
+	    );
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+	tup = erts_bld_tuple(hpp, szp, 2,
+			     erts_bld_string(hpp, szp, "Native spinlocks"),
+#ifdef ETHR_NATIVE_SPINLOCK_IMPL
+			     erts_bld_string(hpp, szp, ETHR_NATIVE_SPINLOCK_IMPL)
+#else
+			     erts_bld_string(hpp, szp, "no")
+#endif
+	    );
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+
+	list = NIL;
+#ifdef ETHR_NATIVE_DW_ATOMIC_IMPL
+	if (ethr_have_native_dw_atomic()) {
+	    name = erts_bld_string(hpp, szp, ETHR_NATIVE_DW_ATOMIC_IMPL);
+	    str = ethr_native_dw_atomic_ops();
+	    for (i = 0; str[i]; i++) {
+		erts_snprintf(buf, sizeof(buf), "ethr_native_dw_atomic_%s()", str[i]);
+		list = erts_bld_cons(hpp, szp,
+				     erts_bld_string(hpp, szp, buf),
+				     list);
+	    }
+	    str = ethr_native_su_dw_atomic_ops();
+	    for (i = 0; str[i]; i++) {
+		erts_snprintf(buf, sizeof(buf), "ethr_native_su_dw_atomic_%s()", str[i]);
+		list = erts_bld_cons(hpp, szp,
+				     erts_bld_string(hpp, szp, buf),
+				     list);
+	    }
+	}
+	else 
+#endif
+	    name = erts_bld_string(hpp, szp, "no");
+
+	tup = erts_bld_tuple(hpp, szp, 3,
+			     erts_bld_string(hpp, szp, "Double word native atomics"),
+			     name,
+			     list);
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+	list = NIL;
+#ifdef ETHR_NATIVE_ATOMIC64_IMPL
+	name = erts_bld_string(hpp, szp, ETHR_NATIVE_ATOMIC64_IMPL);
+	str = ethr_native_atomic64_ops();
+	for (i = 0; str[i]; i++) {
+	    erts_snprintf(buf, sizeof(buf), "ethr_native_atomic64_%s()", str[i]);
+	    list = erts_bld_cons(hpp, szp,
+				 erts_bld_string(hpp, szp, buf),
+				 list);
+	}
+#else
+	name = erts_bld_string(hpp, szp, "no");
+#endif
+	tup = erts_bld_tuple(hpp, szp, 3,
+			     erts_bld_string(hpp, szp, "64-bit native atomics"),
+			     name,
+			     list);
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+	list = NIL;
+#ifdef ETHR_NATIVE_ATOMIC32_IMPL
+	name = erts_bld_string(hpp, szp, ETHR_NATIVE_ATOMIC32_IMPL);
+	str = ethr_native_atomic32_ops();
+	for (i = 0; str[i]; i++) {
+	    erts_snprintf(buf, sizeof(buf), "ethr_native_atomic32_%s()", str[i]);
+	    list = erts_bld_cons(hpp, szp,
+				erts_bld_string(hpp, szp, buf),
+				list);
+	}
+#else
+	name = erts_bld_string(hpp, szp, "no");
+#endif
+	tup = erts_bld_tuple(hpp, szp, 3,
+			     erts_bld_string(hpp, szp, "32-bit native atomics"),
+			     name,
+			     list);
+	res = erts_bld_cons(hpp, szp, tup, res);
+
+	if (hpp) {
+	    HRelease(c_p, end_hp, *hpp)
+	    return res;
+	}
+
+	hp = HAlloc(c_p, sz);
+	end_hp = hp + sz;
+	hpp = &hp;
+	szp = NULL;
+    }
+}
+
 /*
  * To be used to silence unused result warnings, but do not abuse it.
  */
@@ -3720,7 +4020,6 @@ erts_smp_ensure_later_interval_acqb(erts_interval_t *icp, Uint64 ic)
 	return ++icp->counter.not_atomic;
 #endif
 }
-
 
 /*
  * A millisecond timestamp without time correction where there's no hrtime

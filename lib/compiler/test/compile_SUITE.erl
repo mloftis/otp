@@ -139,8 +139,8 @@ forms_2(Config) when is_list(Config) ->
 module_mismatch(Config) when is_list(Config) ->
     ?line DataDir = ?config(data_dir, Config),
     ?line File = filename:join(DataDir, "wrong_module_name.erl"),
-    ?line {error,[{"wrong_module_name.beam",
-		   [{compile,{module_name,arne,"wrong_module_name"}}]}],
+    {error,[{"wrong_module_name.beam",
+	     [{none,compile,{module_name,arne,"wrong_module_name"}}]}],
 	   []} = compile:file(File, [return]),
     ?line error = compile:file(File, [report]),
 
@@ -769,8 +769,8 @@ do_core({M,A}, Outdir) ->
 	    error
     end.
 
-%% Compile to Beam assembly language (.S) and the try to
-%% run .S throught the compiler again.
+%% Compile to Beam assembly language (.S) and then try to
+%% run .S through the compiler again.
 
 asm(Config) when is_list(Config) ->
     ?line Dog = test_server:timetrap(test_server:minutes(20)),
@@ -794,7 +794,7 @@ do_asm(Beam, Outdir) ->
 	{ok,Fd} = file:open(AsmFile, [write,{encoding,utf8}]),
 	beam_listing:module(Fd, Asm),
 	ok = file:close(Fd),
-	case compile:file(AsmFile, [from_asm,no_postopt,binary,report]) of
+	case compile:file(AsmFile, [from_asm,binary,report]) of
 	    {ok,M,_} ->
 		ok = file:delete(AsmFile);
 	    Other ->

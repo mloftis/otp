@@ -1,7 +1,7 @@
 %%
 %% %CopyrightBegin%
 %% 
-%% Copyright Ericsson AB 2005-2012. All Rights Reserved.
+%% Copyright Ericsson AB 2005-2013. All Rights Reserved.
 %% 
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -178,7 +178,7 @@ api_deflateInit(Config) when is_list(Config) ->
 			  ?m(ok,zlib:close(Z))
 		  end, lists:seq(1,8)),
     
-    Strategies = [filtered,huffman_only,default],
+    Strategies = [filtered,huffman_only,rle,default],
     lists:foreach(fun(Strategy) ->
 			  ?line Z = zlib:open(),
 			  ?m(ok, zlib:deflateInit(Z,best_speed,deflated,-15,8,Strategy)),
@@ -220,7 +220,6 @@ api_deflateParams(Config) when is_list(Config) ->
     ?m(_, zlib:deflate(Z1, <<1,1,1,1,1,1,1,1,1>>, none)),
     ?m(ok, zlib:deflateParams(Z1, best_compression, huffman_only)),
     ?m(_, zlib:deflate(Z1, <<1,1,1,1,1,1,1,1,1>>, sync)),
-    ?m({'EXIT',_}, zlib:deflateParams(Z1,best_speed, filtered)),
     ?m(ok, zlib:close(Z1)).
 
 api_deflate(doc) -> "Test deflate";
@@ -565,8 +564,8 @@ intro(Config) when is_list(Config) ->
 large_deflate(doc) -> "Test deflate large file, which had a bug reported on erlang-bugs";
 large_deflate(suite) -> [];
 large_deflate(Config) when is_list(Config) ->
-    large_deflate().
-large_deflate() ->
+    large_deflate_do().
+large_deflate_do() ->
     ?line Z = zlib:open(),
     ?line Plain = rand_bytes(zlib:getBufSize(Z)*5),
     ?line ok = zlib:deflateInit(Z),
@@ -899,7 +898,7 @@ worker(Seed, FnATpl, Parent) ->
     Parent ! self().
 
 worker_loop(0, _FnATpl) ->
-    large_deflate(), % the time consuming one as finale
+    large_deflate_do(), % the time consuming one as finale
     ok;
 worker_loop(N, FnATpl) ->
     {F,A} = element(random:uniform(size(FnATpl)),FnATpl),

@@ -46,6 +46,7 @@
 -define(INET_PASSIVE, 0).
 -define(INET_ACTIVE,  1).
 -define(INET_ONCE,    2). % Active once then passive
+-define(INET_MULTI,   3). % Active N then passive
 
 %% state codes (getstatus, INET_REQ_GETSTATUS)
 -define(INET_F_OPEN,         16#0001).
@@ -86,6 +87,8 @@
 -define(INET_REQ_ACCEPT,        26).
 -define(INET_REQ_LISTEN,        27).
 -define(INET_REQ_IGNOREFD,      28).
+-define(INET_REQ_GETLADDRS,     29).
+-define(INET_REQ_GETPADDRS,     30).
 
 %% TCP requests
 %%-define(TCP_REQ_ACCEPT,         40). MOVED
@@ -143,6 +146,7 @@
 -define(INET_LOPT_TCP_SEND_TIMEOUT_CLOSE, 35).
 -define(INET_LOPT_MSGQ_HIWTRMRK,  36).
 -define(INET_LOPT_MSGQ_LOWTRMRK,  37).
+-define(INET_LOPT_NETNS,          38).
 % Specific SCTP options: separate range:
 -define(SCTP_OPT_RTOINFO,	 	100).
 -define(SCTP_OPT_ASSOCINFO,	 	101).

@@ -27,6 +27,7 @@
 	 erlang_type/1,
 	 initial_capital/1,
 	 specs/1, suites/2,
+	 specialized_specs/2,
 	 subst_file/3, subst/2, print_data/1,
 	 make_non_erlang/2,
 	 maybe_atom_to_list/1, progress/4,
@@ -91,13 +92,22 @@ initial_capital([C|Rest]) when $a =< C, C =< $z ->
 initial_capital(String) ->
     String.
 
+specialized_specs(Dir,PostFix) ->
+    Specs = filelib:wildcard(filename:join([filename:dirname(Dir),
+					    "*_test", "*_"++PostFix++".spec"])),
+    sort_tests([begin
+		    Base = filename:basename(Name),
+		    list_to_atom(string:substr(Base,1,string:rstr(Base,"_")-1))
+		end || Name <- Specs]).
+
 specs(Dir) ->
     Specs = filelib:wildcard(filename:join([filename:dirname(Dir),
 					    "*_test", "*.{dyn,}spec"])),
-    % Filter away all spec which end with _bench.spec
+    % Filter away all spec which end with {_bench,_smoke}.spec
     NoBench = fun(SpecName) ->
 		      case lists:reverse(SpecName) of
 			  "ceps.hcneb_"++_ -> false;
+			  "ceps.ekoms_"++_ -> false;
 			  _ -> true
 		      end
 	      end,
@@ -135,16 +145,13 @@ suite_order(sasl) -> 16;
 suite_order(tools) -> 18;
 suite_order(runtime_tools) -> 19;
 suite_order(parsetools) -> 20;
-suite_order(pman) -> 21;
 suite_order(debugger) -> 22;
-suite_order(toolbar) -> 23;
 suite_order(ic) -> 24;
 suite_order(orber) -> 26;
 suite_order(inets) -> 28;
 suite_order(asn1) -> 30;
 suite_order(os_mon) -> 32;
 suite_order(snmp) -> 38;
-suite_order(mnesia_session) -> 42;
 suite_order(mnesia) -> 44;
 suite_order(system) -> 999; %% IMPORTANT: system SHOULD always be last!
 suite_order(_) -> 200.
@@ -157,7 +164,7 @@ subst_file(In, Out, Vars) ->
     case file:read_file(In) of
 	{ok, Bin} ->
 	    Subst = subst(b2s(Bin), Vars, []),
-	    case file:write_file(Out, Subst) of
+	    case file:write_file(Out, unicode:characters_to_binary(Subst)) of
 		ok ->
 		    ok;
 		{error, Reason} ->

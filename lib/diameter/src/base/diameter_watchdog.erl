@@ -201,7 +201,7 @@ common_dictionary(Apps) ->
             %% means a user won't be able either send of receive
             %% messages in the common dictionary: incoming request
             %% will be answered with 3007 and outgoing requests cannot
-            %% be sent. The dictionary returned here is oly used for
+            %% be sent. The dictionary returned here is only used for
             %% messages diameter sends and receives: CER/CEA, DPR/DPA
             %% and DWR/DWA.
             ?BASE
@@ -329,7 +329,7 @@ code_change(_, State, _) ->
 %% the commentary is ours.
 
 %% Service or watchdog is telling the watchdog of an accepting
-%% transport to die after reconnect_timer expiry or reestablished
+%% transport to die after connect_timer expiry or reestablished
 %% connection (in another transport process) respectively.
 transition(close, #watchdog{status = down}) ->
     {{accept, _}, _, _} = getr(restart), %% assert
@@ -461,15 +461,28 @@ eraser(Key) ->
 
 %% encode/3
 
-encode(Msg, Mask, Dict) ->
+encode(dwr = M, Dict0, Mask) ->
+    Msg = getr(M),
     Seq = diameter_session:sequence(Mask),
     Hdr = #diameter_header{version = ?DIAMETER_VERSION,
                            end_to_end_id = Seq,
                            hop_by_hop_id = Seq},
     Pkt = #diameter_packet{header = Hdr,
                            msg = Msg},
-    #diameter_packet{bin = Bin} = diameter_codec:encode(Dict, Pkt),
-    Bin.
+    #diameter_packet{bin = Bin} = diameter_codec:encode(Dict0, Pkt),
+    Bin;
+
+
+encode(dwa, Dict0, #diameter_packet{header = H, transport_data = TD}
+                   = ReqPkt) ->
+    AnsPkt = #diameter_packet{header
+                              = H#diameter_header{is_request = false,
+                                                  is_error = undefined,
+                                                  is_retransmitted = false},
+                              msg = dwa(ReqPkt),
+                              transport_data = TD},
+
+    diameter_codec:encode(Dict0, AnsPkt).
 
 %% okay/3
 
@@ -527,7 +540,7 @@ send_watchdog(#watchdog{pending = false,
                         dictionary = Dict0,
                         sequence = Mask}
               = S) ->
-    send(TPid, {send, encode(getr(dwr), Mask, Dict0)}),
+    send(TPid, {send, encode(dwr, Dict0, Mask)}),
     ?LOG(send, 'DWR'),
     S#watchdog{pending = true}.
 
@@ -545,10 +558,14 @@ recv(Name, Pkt, S) ->
 
 %% rcv/3
 
+rcv('DWR', Pkt, #watchdog{transport = TPid,
+                          dictionary = Dict0}) ->
+    send(TPid, {send, encode(dwa, Dict0, Pkt)}),
+    ?LOG(send, 'DWA');
+
 rcv(N, _, _)
   when N == 'CER';
        N == 'CEA';
-       N == 'DWR';
        N == 'DWA';
        N == 'DPR';
        N == 'DPA' ->
@@ -641,6 +658,9 @@ rcv('DWA', #watchdog{status = reopen,
                pending = false};
 
 %%   REOPEN        Receive non-DWA      Throwaway()          REOPEN
+
+rcv('DWR', #watchdog{status = reopen} = S) ->
+    S;  %% ensure DWA: the RFC isn't explicit about answering
 
 rcv(_, #watchdog{status = reopen} = S) ->
     throwaway(S).
@@ -781,6 +801,13 @@ dwr(#diameter_caps{origin_host = OH,
     ['DWR', {'Origin-Host', OH},
             {'Origin-Realm', OR},
             {'Origin-State-Id', OSI}].
+
+%% dwa/1
+
+dwa(#diameter_packet{header = H, errors = Es}) ->
+    {RC, FailedAVP} = diameter_peer_fsm:result_code(H, Es),
+    ['DWA', {'Result-Code', RC}
+          | tl(getr(dwr)) ++ FailedAVP].
 
 %% restrict_nodes/1
 

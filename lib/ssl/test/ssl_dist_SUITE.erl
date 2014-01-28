@@ -95,7 +95,7 @@ common_init(Case, Config) ->
 
 end_per_testcase(Case, Config) when is_list(Config) ->
     Flags = proplists:get_value(old_flags, Config),
-    os:putenv("ERL_FLAGS", Flags),
+    catch os:putenv("ERL_FLAGS", Flags),
     common_end(Case, Config).
 
 common_end(_, Config) ->
@@ -324,7 +324,7 @@ start_ssl_node_raw(Name, Args) ->
 				 [binary, {packet, 4}, {active, false}]),
     {ok, ListenPort} = inet:port(LSock),
     CmdLine = mk_node_cmdline(ListenPort, Name, Args),
-    ?t:format("Attempting to start ssl node ~s: ~s~n", [Name, CmdLine]),
+    ?t:format("Attempting to start ssl node ~ts: ~ts~n", [Name, CmdLine]),
     case open_port({spawn, CmdLine}, []) of
 	Port when is_port(Port) ->
 	    unlink(Port),

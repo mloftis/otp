@@ -111,7 +111,6 @@
 #include "erl_driver.h"
 #include "erl_efile.h"
 #include "erl_threads.h"
-#include "zlib.h"
 #include "gzio.h"
 #include "dtrace-wrapper.h" 
 #include <ctype.h>
@@ -542,57 +541,85 @@ static void *ef_safe_realloc(void *op, Uint s)
  */
 
 /* char EV_CHAR_P(ErlIOVec *ev, int p, int q) */
-#define EV_CHAR_P(ev, p, q)                   \
-    (((char *)(ev)->iov[(q)].iov_base) + (p))
+#define EV_CHAR_P(ev, p, q)			\
+    (((char *)(ev)->iov[q].iov_base) + (p))
 
 /* int EV_GET_CHAR(ErlIOVec *ev, char *p, int *pp, int *qp) */
-#define EV_GET_CHAR(ev, p, pp, qp)                      \
-    (*(pp)+1 <= (ev)->iov[*(qp)].iov_len                \
-     ? (*(p) = *EV_CHAR_P(ev, *(pp), *(qp)),            \
-        *(pp) = (    *(pp)+1 < (ev)->iov[*(qp)].iov_len \
-                 ?   *(pp)+1                            \
-                 : ((*(qp))++, 0)),                     \
-        !0)                                             \
-     : 0)
+#define EV_GET_CHAR(ev, p, pp, qp) efile_ev_get_char(ev, p ,pp, qp)
+static int
+efile_ev_get_char(ErlIOVec *ev, char *p, size_t *pp, size_t *qp) {
+    if (*pp + 1 <= ev->iov[*qp].iov_len) {
+	*p = *EV_CHAR_P(ev, *pp, *qp);
+	if (*pp + 1 < ev->iov[*qp].iov_len)
+	    *pp += 1;
+	else {
+	    *qp += 1;
+	    *pp = 0;
+	}
+	return !0;
+    }
+    return 0;
+}
 
 /* Uint32 EV_UINT32(ErlIOVec *ev, int p, int q)*/
-#define EV_UINT32(ev, p, q) \
-    ((Uint32) *(((unsigned char *)(ev)->iov[(q)].iov_base) + (p)))
+#define EV_UINT32(ev, p, q)						\
+    ((Uint32) ((unsigned char *)(ev)->iov[q].iov_base)[p])
 
 /* int EV_GET_UINT32(ErlIOVec *ev, Uint32 *p, int *pp, int *qp) */
-#define EV_GET_UINT32(ev, p, pp, qp)                      \
-    (*(pp)+4 <= (ev)->iov[*(qp)].iov_len                  \
-     ? (*(p) = (EV_UINT32(ev, *(pp),   *(qp)) << 24)      \
-             | (EV_UINT32(ev, *(pp)+1, *(qp)) << 16)      \
-             | (EV_UINT32(ev, *(pp)+2, *(qp)) << 8)       \
-             | (EV_UINT32(ev, *(pp)+3, *(qp))),           \
-        *(pp) = (    *(pp)+4 < (ev)->iov[*(qp)].iov_len   \
-                 ?   *(pp)+4                              \
-                 : ((*(qp))++, 0)),                       \
-        !0)                                               \
-     : 0)
+#define EV_GET_UINT32(ev, p, pp, qp) efile_ev_get_uint32(ev, p, pp, qp)
+static int
+efile_ev_get_uint32(ErlIOVec *ev, Uint32 *p, size_t *pp, size_t *qp) {
+    if (*pp + 4 <= ev->iov[*qp].iov_len) {
+	*p = (EV_UINT32(ev, *pp,   *qp) << 24)
+	    | (EV_UINT32(ev, *pp + 1, *qp) << 16)
+	    | (EV_UINT32(ev, *pp + 2, *qp) << 8)
+	    | (EV_UINT32(ev, *pp + 3, *qp));
+	if (*pp + 4 < ev->iov[*qp].iov_len)
+	    *pp += 4;
+	else {
+	    *qp += 1;
+	    *pp = 0;
+	}
+	return !0;
+    }
+    return 0;
+}
 
 /* Uint64 EV_UINT64(ErlIOVec *ev, int p, int q)*/
-#define EV_UINT64(ev, p, q) \
-    ((Uint64) *(((unsigned char *)(ev)->iov[(q)].iov_base) + (p)))
+#define EV_UINT64(ev, p, q)						\
+    ((Uint64) ((unsigned char *)(ev)->iov[q].iov_base)[p])
 
-/* int EV_GET_UINT64(ErlIOVec *ev, Uint32 *p, int *pp, int *qp) */
-#define EV_GET_UINT64(ev, p, pp, qp)                      \
-    (*(pp)+8 <= (ev)->iov[*(qp)].iov_len                  \
-     ? (*(p) = (EV_UINT64(ev, *(pp),   *(qp)) << 56)      \
-             | (EV_UINT64(ev, *(pp)+1, *(qp)) << 48)      \
-             | (EV_UINT64(ev, *(pp)+2, *(qp)) << 40)      \
-             | (EV_UINT64(ev, *(pp)+3, *(qp)) << 32)      \
-             | (EV_UINT64(ev, *(pp)+4, *(qp)) << 24)      \
-             | (EV_UINT64(ev, *(pp)+5, *(qp)) << 16)      \
-             | (EV_UINT64(ev, *(pp)+6, *(qp)) << 8)       \
-             | (EV_UINT64(ev, *(pp)+7, *(qp))),           \
-        *(pp) = (    *(pp)+8 < (ev)->iov[*(qp)].iov_len   \
-                 ?   *(pp)+8                              \
-                 : ((*(qp))++, 0)),                       \
-        !0)                                               \
-     : 0)
+/* int EV_GET_UINT64(ErlIOVec *ev, Uint64 *p, int *pp, int *qp) */
+#define EV_GET_UINT64(ev, p, pp, qp) efile_ev_get_uint64(ev, p, pp, qp)
+static int
+efile_ev_get_uint64(ErlIOVec *ev, Uint64 *p, size_t *pp, size_t *qp) {
+    if (*pp + 8 <= ev->iov[*qp].iov_len) {
+	*p = (EV_UINT64(ev, *pp, *qp) << 56)
+	    | (EV_UINT64(ev, *pp + 1, *qp) << 48)
+	    | (EV_UINT64(ev, *pp + 2, *qp) << 40)
+	    | (EV_UINT64(ev, *pp + 3, *qp) << 32)
+	    | (EV_UINT64(ev, *pp + 4, *qp) << 24)
+	    | (EV_UINT64(ev, *pp + 5, *qp) << 16)
+	    | (EV_UINT64(ev, *pp + 6, *qp) << 8)
+	    | (EV_UINT64(ev, *pp + 7, *qp));
+	if (*pp + 8 < ev->iov[*qp].iov_len)
+	    *pp += 8;
+	else {
+	    *qp += 1;
+	    *pp = 0;
+	}
+	return !0;
+    }
+    return 0;
+}
 
+/* int EV_GET_SINT64(ErlIOVec *ev, Uint64 *p, int *pp, int *qp) */
+#define EV_GET_SINT64(ev, p, pp, qp) efile_ev_get_sint64(ev, p, pp, qp)
+static int
+efile_ev_get_sint64(ErlIOVec *ev, Sint64 *p, size_t *pp, size_t *qp) {
+    Uint64 *tmp = (Uint64*)p;
+    return EV_GET_UINT64(ev, tmp, pp, qp);
+}
 
 #if 0
 
@@ -744,6 +771,7 @@ file_init(void)
     return 0;
 }
 
+
 /*********************************************************************
  * Driver entry point -> start
  */
@@ -760,7 +788,7 @@ file_start(ErlDrvPort port, char* command)
     }
     desc->fd = FILE_FD_INVALID;
     desc->port = port;
-    desc->key = (unsigned int) (UWord) port;
+    desc->key = driver_async_port_key(port);
     desc->flags = 0;
     desc->invoke = NULL;
     desc->d = NULL;
@@ -789,7 +817,7 @@ file_start(ErlDrvPort port, char* command)
 
 static void do_close(int flags, SWord fd) {
     if (flags & EFILE_COMPRESSED) {
-	erts_gzclose((gzFile)(fd));
+	erts_gzclose((ErtsGzFile)(fd));
     } else {
 	efile_closefile((int) fd);
     }
@@ -1107,10 +1135,10 @@ static void invoke_read(void *data)
     }
     read_size = size;
     if (d->flags & EFILE_COMPRESSED) {
-	read_size = erts_gzread((gzFile)d->fd, 
+	read_size = erts_gzread((ErtsGzFile)d->fd,
 				d->c.read.binp->orig_bytes + d->c.read.bin_offset,
 				size);
-	status = (read_size != -1);
+	status = (read_size != (size_t) -1);
 	if (!status) {
 	    d->errInfo.posix_errno = EIO;
 	}
@@ -1180,11 +1208,11 @@ static void invoke_read_line(void *data)
 	    size = need - d->c.read_line.read_size;
 	}
 	if (d->flags & EFILE_COMPRESSED) {
-	    read_size = erts_gzread((gzFile)d->fd, 
+	    read_size = erts_gzread((ErtsGzFile)d->fd,
 				    d->c.read_line.binp->orig_bytes + 
 				    d->c.read_line.read_offset + d->c.read_line.read_size,
 				    size);
-	    status = (read_size != -1);
+	    status = (read_size != (size_t) -1);
 	    if (!status) {
 		d->errInfo.posix_errno = EIO;
 	    }
@@ -1221,7 +1249,7 @@ static void invoke_read_line(void *data)
 		    d->c.read_line.read_size -= too_much;
 		    ASSERT(d->c.read_line.read_size >= 0);
 		    if (d->flags & EFILE_COMPRESSED) {
-			Sint64 location = erts_gzseek((gzFile)d->fd, 
+			Sint64 location = erts_gzseek((ErtsGzFile)d->fd,
 						      -((Sint64) too_much), EFILE_SEEK_CUR);
 			if (location == -1) {
 			    d->result_ok = 0;
@@ -1506,7 +1534,7 @@ static void invoke_writev(void *data) {
 		     */
 		    errno = EINVAL; 
 		    if (! (status = 
-			   erts_gzwrite((gzFile)d->fd, 
+			   erts_gzwrite((ErtsGzFile)d->fd,
 					iov[i].iov_base,
 					iov[i].iov_len)) == iov[i].iov_len) {
 			d->errInfo.posix_errno =
@@ -1678,8 +1706,9 @@ static void invoke_pwritev(void *data) {
 	    ASSERT(written == size);
 	    d->again = 0;
 	}
-    } else
+    } else {
       ASSERT(written >= FILE_SEGMENT_WRITE);
+    }
       
     MUTEX_LOCK(d->c.writev.q_mtx);
     driver_deq(d->c.pwritev.port, written);
@@ -1767,7 +1796,7 @@ static void invoke_lseek(void *data)
 	    d->errInfo.posix_errno = EINVAL;
 	    status = 0;
 	} else {
-	    d->c.lseek.location = erts_gzseek((gzFile)d->fd, 
+	    d->c.lseek.location = erts_gzseek((ErtsGzFile)d->fd,
 					      offset, d->c.lseek.origin);
 	    if (d->c.lseek.location == -1) {
 		d->errInfo.posix_errno = errno;
@@ -1855,7 +1884,7 @@ static void invoke_open(void *data)
 	    if (status || (d->errInfo.posix_errno != EISDIR)) {
 		mode = (d->flags & EFILE_MODE_READ) ? "rb" : "wb";
 		d->fd = (SWord) erts_gzopen(d->b, mode);
-		if ((gzFile)d->fd) {
+		if ((ErtsGzFile)d->fd) {
 		    status = 1;
 		} else {
 		    if (errno == 0) {
@@ -3105,25 +3134,25 @@ file_flush(ErlDrvData e) {
 
 /*********************************************************************
  * Driver entry point -> control
+ * Only debug functionality...
  */
 static ErlDrvSSizeT
 file_control(ErlDrvData e, unsigned int command, 
 	     char* buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen) {
-    /*
-     *  warning: variable ‘desc’ set but not used 
-     *  [-Wunused-but-set-variable]
-     *  ... no kidding ...
-     *
-     *
     file_descriptor *desc = (file_descriptor *)e;
     switch (command) {
+    case 'K' :
+	if (rlen < 4) {
+	    *rbuf = EF_ALLOC(4);
+	}
+	(*rbuf)[0] = ((desc->key) >> 24) & 0xFF;
+	(*rbuf)[1] = ((desc->key) >> 16) & 0xFF;
+	(*rbuf)[2] = ((desc->key) >> 8) & 0xFF;
+	(*rbuf)[3] = (desc->key) & 0xFF;
+	return 4;
     default:
 	return 0;
-    } 
-    ASSERT(0);
-    desc = NULL; 
-    */
-    return 0;
+    }
 }
 
 /*********************************************************************
@@ -3176,7 +3205,7 @@ static void
 file_outputv(ErlDrvData e, ErlIOVec *ev) {
     file_descriptor* desc = (file_descriptor*)e;
     char command;
-    int p, q;
+    size_t p, q;
     int err;
     struct t_data *d = NULL;
 #ifdef USE_VM_PROBES
@@ -3604,7 +3633,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	for(i = 0; i < n; i++) {
 	    Uint32 sizeH, sizeL;
 	    size_t size;
-	    if (   !EV_GET_UINT64(ev, &d->c.pwritev.specs[i].offset, &p, &q)
+	    if (   !EV_GET_SINT64(ev, &d->c.pwritev.specs[i].offset, &p, &q)
 		|| !EV_GET_UINT32(ev, &sizeH, &p, &q)
 		|| !EV_GET_UINT32(ev, &sizeL, &p, &q)) {
 		/* Misalignment in buffer */
@@ -3746,7 +3775,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	for (i = 1; i < 1+n; i++) {
 	    Uint32 sizeH, sizeL;
 	    size_t size;
-	    if (   !EV_GET_UINT64(ev, &d->c.preadv.offsets[i-1], &p, &q)
+	    if (   !EV_GET_SINT64(ev, &d->c.preadv.offsets[i-1], &p, &q)
 		|| !EV_GET_UINT32(ev, &sizeH, &p, &q)
 		|| !EV_GET_UINT32(ev, &sizeL, &p, &q)) {
 		reply_posix_error(desc, EINVAL);
@@ -3814,7 +3843,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	Uint32 origin;		/* Origin of seek. */
 
 	if (ev->size < 1+8+4
-	    || !EV_GET_UINT64(ev, &offset, &p, &q)
+	    || !EV_GET_SINT64(ev, &offset, &p, &q)
 	    || !EV_GET_UINT32(ev, &origin, &p, &q)) {
 	    /* Wrong length of buffer to contain offset and origin */
 	    reply_posix_error(desc, EINVAL);
@@ -3927,7 +3956,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	    goto done;
 	}
 	if (ev->size < 1+1+8+4
-	    || !EV_GET_UINT64(ev, &hdr_offset, &p, &q)
+	    || !EV_GET_SINT64(ev, &hdr_offset, &p, &q)
 	    || !EV_GET_UINT32(ev, &max_size, &p, &q)) {
 	    /* Buffer too short to contain 
 	     * the header offset and max size spec */

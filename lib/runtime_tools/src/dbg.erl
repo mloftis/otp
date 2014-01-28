@@ -1113,7 +1113,7 @@ transform_flags([sos|Tail],Acc) -> transform_flags(Tail,[set_on_spawn|Acc]);
 transform_flags([sol|Tail],Acc) -> transform_flags(Tail,[set_on_link|Acc]);
 transform_flags([sofs|Tail],Acc) -> transform_flags(Tail,[set_on_first_spawn|Acc]);
 transform_flags([sofl|Tail],Acc) -> transform_flags(Tail,[set_on_first_link|Acc]);
-transform_flags([all|_],_Acc) -> all();
+transform_flags([all|_],_Acc) -> all()--[silent];
 transform_flags([F|Tail]=List,Acc) when is_atom(F) ->
     case lists:member(F, all()) of
 	true -> transform_flags(Tail,[F|Acc]);
@@ -1124,7 +1124,7 @@ transform_flags(Bad,_Acc) -> {error,{bad_flags,Bad}}.
 all() ->
     [send,'receive',call,procs,garbage_collection,running,
      set_on_spawn,set_on_first_spawn,set_on_link,set_on_first_link,
-     timestamp,arity,return_to].
+     timestamp,arity,return_to,silent].
 
 display_info([Node|Nodes]) ->
     io:format("~nNode ~w:~n",[Node]),
@@ -1786,12 +1786,12 @@ h(get_tracer) ->
        " - Returns the process or port to which all trace messages are sent."]);
 h(stop) ->
     help_display(
-      ["stop() -> stopped",
+      ["stop() -> ok",
        " - Stops the dbg server and the tracing of all processes.",
        "   Does not clear any trace patterns."]);
 h(stop_clear) ->
     help_display(
-      ["stop_clear() -> stopped",
+      ["stop_clear() -> ok",
        " - Stops the dbg server and the tracing of all processes,",
        "   and clears all trace patterns."]).
 

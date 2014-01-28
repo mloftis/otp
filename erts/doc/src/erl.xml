@@ -524,7 +524,7 @@
 	<p>Calling <c>erlang:halt/1</c> with a string argument will still
 	produce a crash dump.</p>
       </item>
-      <tag><c><![CDATA[+e Number]]></c></tag>
+      <tag><marker id="+e"><c><![CDATA[+e Number]]></c></marker></tag>
       <item>
         <p>Set max number of ETS tables.</p>
       </item>
@@ -748,19 +748,47 @@
       </item>
       <tag><marker id="+S"><c><![CDATA[+S Schedulers:SchedulerOnline]]></c></marker></tag>
       <item>
-        <p>Sets the amount of scheduler threads to create and scheduler
-	  threads to set online when SMP support has been enabled.
-	  Valid range for both values are 1-1024. If the
-          Erlang runtime system is able to determine the amount
-          of logical processors configured and logical processors available,
-	  <c>Schedulers</c> will default to logical processors configured,
-	  and <c>SchedulersOnline</c> will default to logical processors
-	  available; otherwise, the default values will be 1. <c>Schedulers</c>
-	  may be omitted if <c>:SchedulerOnline</c> is not and vice versa. The
-	  amount of schedulers online can be changed at run time via
+        <p>Sets the number of scheduler threads to create and scheduler
+	  threads to set online when SMP support has been enabled. The maximum for
+	  both values is 1024. If the Erlang runtime system is able to determine the
+	  amount of logical processors configured and logical processors available,
+	  <c>Schedulers</c> will default to logical processors configured, and
+	  <c>SchedulersOnline</c> will default to logical processors available;
+	  otherwise, the default values will be 1. <c>Schedulers</c> may be omitted
+	  if <c>:SchedulerOnline</c> is not and vice versa. The number of schedulers
+	  online can be changed at run time via
 	  <seealso marker="erlang#system_flag_schedulers_online">erlang:system_flag(schedulers_online, SchedulersOnline)</seealso>.
 	</p>
-        <p>This flag will be ignored if the emulator doesn't have
+	<p>If <c>Schedulers</c> or <c>SchedulersOnline</c> is specified as a
+	  negative number, the value is subtracted from the default number of
+	  logical processors configured or logical processors available, respectively.
+	</p>
+	<p>Specifying the value 0 for <c>Schedulers</c> or <c>SchedulersOnline</c>
+	  resets the number of scheduler threads or scheduler threads online respectively
+	  to its default value.
+	</p>
+        <p>This option is ignored if the emulator doesn't have
+          SMP support enabled (see the <seealso marker="#smp">-smp</seealso>
+          flag).</p>
+      </item>
+      <tag><marker id="+SP"><c><![CDATA[+SP SchedulersPercentage:SchedulersOnlinePercentage]]></c></marker></tag>
+      <item>
+        <p>Similar to <seealso marker="#+S">+S</seealso> but uses percentages to set the
+	  number of scheduler threads to create, based on logical processors configured,
+	  and scheduler threads to set online, based on logical processors available, when
+	  SMP support has been enabled. Specified values must be greater than 0. For example,
+	  <c>+SP 50:25</c> sets the number of scheduler threads to 50% of the logical processors
+	  configured and the number of scheduler threads online to 25% of the logical processors available.
+	  <c>SchedulersPercentage</c> may be omitted if <c>:SchedulersOnlinePercentage</c> is
+	  not and vice versa. The number of schedulers online can be changed at run time via
+	  <seealso marker="erlang#system_flag_schedulers_online">erlang:system_flag(schedulers_online, SchedulersOnline)</seealso>.
+	</p>
+	<p>This option interacts with <seealso marker="#+S">+S</seealso> settings.
+	  For example, on a system with 8 logical cores configured and 8 logical cores
+	  available, the combination of the options <c>+S 4:4 +SP 50:25</c> (in either order)
+	  results in 2 scheduler threads (50% of 4) and 1 scheduler thread online (25% of 4).
+	</p>
+        <p>This option is ignored if the emulator doesn't have
           SMP support enabled (see the <seealso marker="#smp">-smp</seealso>
           flag).</p>
       </item>
@@ -913,6 +941,10 @@
 	    when schedulers frequently run out of work. When disabled,
 	    the frequency with which schedulers run out of work will
 	    not be taken into account by the load balancing logic.
+	    <br/>&nbsp;&nbsp;<c>+scl false</c> is similar to
+	    <seealso marker="#+sub">+sub true</seealso> with the difference
+	    that <c>+sub true</c> also will balance scheduler utilization
+	    between schedulers.
 	    </p>
           </item>
           <tag><marker id="+sct"><c>+sct CpuTopology</c></marker></tag>
@@ -1059,6 +1091,29 @@
 	    documentation of the <seealso marker="#+sbt">+sbt</seealso> flag.
 	    </p>
 	  </item>
+          <tag><marker id="+sub"><c>+sub true|false</c></marker></tag>
+          <item>
+	    <p>Enable or disable
+	    <seealso marker="erts:erlang#statistics_scheduler_wall_time">scheduler
+	    utilization</seealso> balancing of load. By default scheduler
+	    utilization balancing is disabled and instead scheduler
+	    compaction of load is enabled which will strive for a load
+	    distribution which causes as many scheduler threads as possible
+	    to be fully loaded (i.e., not run out of work). When scheduler
+	    utilization balancing is enabled the system will instead try to
+	    balance scheduler utilization between schedulers. That is,
+	    strive for equal scheduler utilization on all schedulers.
+	    <br/>&nbsp;&nbsp;&nbsp;<c>+sub true</c> is only supported on
+	    systems where the runtime system detects and use a monotonically
+	    increasing high resolution clock. On other systems, the runtime
+	    system will fail to start.
+	    <br/>&nbsp;&nbsp;&nbsp;<c>+sub true</c> implies
+	    <seealso marker="#+scl">+scl false</seealso>. The difference
+	    between <c>+sub true</c> and <c>+scl false</c> is that
+	    <c>+scl false</c> will not try to balance the scheduler
+	    utilization.
+	    </p>
+          </item>
 	  <tag><marker id="+swct"><c>+sws very_eager|eager|medium|lazy|very_lazy</c></marker></tag>
 	  <item>
              <p>
@@ -1098,18 +1153,18 @@
           <tag><marker id="+spp"><c>+spp Bool</c></marker></tag>
           <item>
 	    <p>Set default scheduler hint for port parallelism. If set to
-	    <c>true</c>, the VM will schedule port tasks when it by this can
-	    improve the parallelism in the system. If set to <c>false</c>,
-	    the VM will try to perform port tasks immediately and by this
-	    improve latency at the expense of parallelism. If this
-	    flag has not been passed, the default scheduler hint for port
-	    parallelism is currently <c>false</c>. The default used can be
-	    inspected in runtime by calling
-	    <seealso marker="erlang#system_info_port_parallelism">erlang:system_info(port_parallelism)</seealso>.
+	    <c>true</c>, the VM will schedule port tasks when doing so will
+	    improve parallelism in the system. If set to <c>false</c>, the VM
+	    will try to perform port tasks immediately, improving latency at the
+	    expense of parallelism. If this flag has not been passed, the
+	    default scheduler hint for port parallelism is currently
+	    <c>false</c>. The default used can be inspected in runtime by
+	    calling <seealso
+	    marker="erlang#system_info_port_parallelism">erlang:system_info(port_parallelism)</seealso>.
 	    The default can be overriden on port creation by passing the
 	    <seealso marker="erlang#open_port_parallelism">parallelism</seealso>
-	    option to
-	    <seealso marker="erlang#open_port/2">open_port/2</seealso></p>.
+	    option to <seealso
+	    marker="erlang#open_port/2">open_port/2</seealso></p>.
 	  </item>
 	  <tag><marker id="sched_thread_stack_size"><c><![CDATA[+sss size]]></c></marker></tag>
 	  <item>

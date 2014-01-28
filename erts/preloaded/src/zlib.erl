@@ -30,6 +30,8 @@
 	 compress/1,uncompress/1,zip/1,unzip/1,
 	 gzip/1,gunzip/1]).
 
+-export_type([zstream/0]).
+
 %% flush argument encoding
 -define(Z_NO_FLUSH,      0).
 -define(Z_SYNC_FLUSH,    2).
@@ -45,6 +47,7 @@
 %% compresssion strategy
 -define(Z_FILTERED,            1).
 -define(Z_HUFFMAN_ONLY,        2).
+-define(Z_RLE,                 3).
 -define(Z_DEFAULT_STRATEGY,    0).
 
 %% deflate compression method
@@ -123,7 +126,7 @@
 -type zmethod()     :: 'deflated'.
 -type zwindowbits() :: -15..-9 | 9..47.
 -type zmemlevel()   :: 1..9.
--type zstrategy()   :: 'default' | 'filtered' | 'huffman_only'.
+-type zstrategy()   :: 'default' | 'filtered' | 'huffman_only' | 'rle'.
 
 %%------------------------------------------------------------------------
 
@@ -484,6 +487,7 @@ arg_level(_) -> erlang:error(badarg).
      
 arg_strategy(filtered) ->     ?Z_FILTERED;
 arg_strategy(huffman_only) -> ?Z_HUFFMAN_ONLY;
+arg_strategy(rle) -> ?Z_RLE;
 arg_strategy(default) ->      ?Z_DEFAULT_STRATEGY;
 arg_strategy(_) -> erlang:error(badarg).
 

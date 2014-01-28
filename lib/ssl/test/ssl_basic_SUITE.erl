@@ -1,7 +1,7 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2007-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2007-2014. All Rights Reserved.
 %%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -27,6 +27,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
+-include("ssl_api.hrl").
 -include("ssl_internal.hrl").
 -include("ssl_alert.hrl").
 -include("ssl_internal.hrl").
@@ -129,7 +130,8 @@ api_tests() ->
      listen_socket,
      ssl_accept_timeout,
      ssl_recv_timeout,
-     versions_option
+     versions_option,
+     server_name_indication_option
     ].
 
 session_tests() ->
@@ -142,6 +144,7 @@ session_tests() ->
 renegotiate_tests() ->
     [client_renegotiate,
      server_renegotiate,
+     client_secure_renegotiate,
      client_renegotiate_reused_session,
      server_renegotiate_reused_session,
      client_no_wrap_sequence_number,
@@ -212,20 +215,19 @@ end_per_suite(_Config) ->
 
 %%--------------------------------------------------------------------
 init_per_group(GroupName, Config) ->
-    case ssl_test_lib:is_tls_version(GroupName) of
+    case ssl_test_lib:is_tls_version(GroupName) andalso ssl_test_lib:sufficient_crypto_support(GroupName) of
 	true ->
+	    ssl_test_lib:init_tls_version(GroupName),
+	    Config;
+	_ ->
 	    case ssl_test_lib:sufficient_crypto_support(GroupName) of
 		true ->
-		    ssl_test_lib:init_tls_version(GroupName),
+		    ssl:start(),
 		    Config;
 		false ->
 		    {skip, "Missing crypto support"}
-	    end;
-	_ ->
-	    ssl:start(),
-	    Config
+	    end
     end.
-
 
 end_per_group(_GroupName, Config) ->
     Config.
@@ -1978,6 +1980,37 @@ client_renegotiate(Config) when is_list(Config) ->
     ssl_test_lib:close(Client).
 
 %%--------------------------------------------------------------------
+client_secure_renegotiate() ->
+    [{doc,"Test ssl:renegotiate/1 on client."}].
+client_secure_renegotiate(Config) when is_list(Config) ->
+    ServerOpts = ?config(server_opts, Config),
+    ClientOpts = ?config(client_opts, Config),
+
+    {ClientNode, ServerNode, Hostname} = ssl_test_lib:run_where(Config),
+
+    Data = "From erlang to erlang",
+
+    Server =
+	ssl_test_lib:start_server([{node, ServerNode}, {port, 0},
+				   {from, self()},
+				   {mfa, {?MODULE, erlang_ssl_receive, [Data]}},
+				   {options, [{secure_renegotiate, true} | ServerOpts]}]),
+    Port = ssl_test_lib:inet_port(Server),
+
+    Client = ssl_test_lib:start_client([{node, ClientNode}, {port, Port},
+					{host, Hostname},
+					{from, self()},
+					{mfa, {?MODULE,
+					       renegotiate, [Data]}},
+					{options, [{reuse_sessions, false},
+						   {secure_renegotiate, true}| ClientOpts]}]),
+    
+    ssl_test_lib:check_result(Client, ok, Server, ok),
+    ssl_test_lib:close(Server),
+    ssl_test_lib:close(Client).
+
+
+%%--------------------------------------------------------------------
 server_renegotiate() ->
     [{doc,"Test ssl:renegotiate/1 on server."}].
 server_renegotiate(Config) when is_list(Config) ->
@@ -2490,7 +2523,10 @@ ssl_accept_timeout(Config) ->
 	    ssl_test_lib:check_result(Server, {error, timeout}),
 	    receive
 		{'EXIT', Server, _} ->
-		    [] = supervisor:which_children(ssl_connection_sup)
+		    %% Make sure supervisor had time to react on process exit
+		    %% Could we come up with a better solution to this?
+		    ct:sleep(500), 
+		    [] = supervisor:which_children(tls_connection_sup)
 	    end
     end.
 
@@ -2646,7 +2682,7 @@ tcp_error_propagation_in_active_mode(Config) when is_list(Config) ->
     {status, _, _, StatusInfo} = sys:get_status(Pid),
     [_, _,_, _, Prop] = StatusInfo,
     State = ssl_test_lib:state(Prop),
-    Socket = element(10, State),
+    Socket = element(11, State),
 
     %% Fake tcp error
     Pid ! {tcp_error, Socket, etimedout},
@@ -2801,6 +2837,47 @@ versions_option(Config) when is_list(Config) ->
     end,	    
    
     ssl_test_lib:check_result(ErrClient, {error, {tls_alert, "protocol version"}}).
+
+
+%%--------------------------------------------------------------------
+
+server_name_indication_option() ->
+    [{doc,"Test API server_name_indication option to connect."}].
+server_name_indication_option(Config) when is_list(Config) ->
+    ClientOpts = ?config(client_opts, Config),
+    ServerOpts = ?config(server_opts, Config),  
+
+    {ClientNode, ServerNode, Hostname} = ssl_test_lib:run_where(Config),
+    Server = ssl_test_lib:start_server([{node, ServerNode}, {port, 0}, 
+					{from, self()}, 
+					{mfa, {ssl_test_lib, send_recv_result_active, []}},
+					{options, ServerOpts}]),
+    Port = ssl_test_lib:inet_port(Server),
+    
+    Client0 = ssl_test_lib:start_client([{node, ClientNode}, {port, Port}, 
+					 {host, Hostname},
+					 {from, self()}, 
+					 {mfa, {ssl_test_lib, send_recv_result_active, []}},
+					 {options,  
+					  [{server_name_indication, disable} | 
+					   ClientOpts]}
+					]),
+    
+    ssl_test_lib:check_result(Server, ok, Client0, ok),
+    Server ! listen,				       
+    
+    Client1 = ssl_test_lib:start_client([{node, ClientNode}, {port, Port}, 
+					 {host, Hostname},
+					 {from, self()}, 
+					 {mfa, {ssl_test_lib, send_recv_result_active, []}},
+					 {options,
+					  [{server_name_indication, Hostname} | ClientOpts]
+					 }]),    
+    ssl_test_lib:check_result(Server, ok, Client1, ok),
+    ssl_test_lib:close(Server),
+    ssl_test_lib:close(Client0),
+    ssl_test_lib:close(Client1).
+
 %%--------------------------------------------------------------------
 %% Internal functions ------------------------------------------------
 %%--------------------------------------------------------------------

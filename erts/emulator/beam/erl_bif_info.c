@@ -30,6 +30,7 @@
 #include "bif.h"
 #include "big.h"
 #include "erl_version.h"
+#include "erl_compile_flags.h"
 #include "erl_db_util.h"
 #include "erl_message.h"
 #include "erl_binary.h"
@@ -63,9 +64,11 @@ static Export *gather_gc_info_res_trap;
 
 #define DECL_AM(S) Eterm AM_ ## S = am_atom_put(#S, sizeof(#S) - 1)
 
+static char otp_correction_package[] = ERLANG_OTP_CORRECTION_PACKAGE;
 /* Keep erts_system_version as a global variable for easy access from a core */
-static char erts_system_version[] = ("Erlang " ERLANG_OTP_RELEASE
-				     " (erts-" ERLANG_VERSION ")"
+static char erts_system_version[] = ("Erlang/OTP " ERLANG_OTP_RELEASE
+				     "%s"
+				     " [erts-" ERLANG_VERSION "]"
 #if !HEAP_ON_C_STACK && !HALFWORD_HEAP
 				     " [no-c-stack-objects]"
 #endif
@@ -303,11 +306,28 @@ make_link_list(Process *p, ErtsLink *root, Eterm tail)
 int
 erts_print_system_version(int to, void *arg, Process *c_p)
 {
+    int i, rc = -1;
+    char *rc_str = "";
+    char rc_buf[100];
+    char *ocp = otp_correction_package;
 #ifdef ERTS_SMP
     Uint total, online, active;
     (void) erts_schedulers_state(&total, &online, &active, 0);
 #endif
-    return erts_print(to, arg, erts_system_version
+    for (i = 0; i < sizeof(otp_correction_package)-4; i++) {
+	if (ocp[i] == '-' && ocp[i+1] == 'r' && ocp[i+2] == 'c')
+	    rc = atoi(&ocp[i+3]);
+    }
+    if (rc >= 0) {
+	if (rc == 0)
+	    rc_str = " [DEVELOPMENT]";
+	else {
+	    erts_snprintf(rc_buf, sizeof(rc_buf), " [RELEASE CANDIDATE %d]", rc);
+	    rc_str = rc_buf;
+	}
+    }
+    return erts_print(to, arg, erts_system_version,
+		      rc_str
 #ifdef ERTS_SMP
 		      , total, online
 #endif
@@ -1770,7 +1790,11 @@ info_1_tuple(Process* BIF_P,	/* Pointer to current process. */
 #if defined(PURIFY)
 	    BIF_RET(erts_make_integer(purify_new_leaks(), BIF_P));
 #elif defined(VALGRIND)
+#  ifdef VALGRIND_DO_ADDED_LEAK_CHECK
+	    VALGRIND_DO_ADDED_LEAK_CHECK;
+#  else
 	    VALGRIND_DO_LEAK_CHECK;
+#  endif
 	    BIF_RET(make_small(0));
 #endif
 	} else if (*tp == am_fd) {
@@ -2090,7 +2114,7 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	BIF_RET(res);
     } else if (BIF_ARG_1 == am_sequential_tracer) {
 	val = erts_get_system_seq_tracer();
-	ASSERT(is_internal_pid(val) || is_internal_port(val) || val==am_false)
+	ASSERT(is_internal_pid(val) || is_internal_port(val) || val==am_false);
 	hp = HAlloc(BIF_P, 3);
 	res = TUPLE2(hp, am_sequential_tracer, val);
 	BIF_RET(res);
@@ -2412,6 +2436,10 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	    DECL_AM(unknown);
 	    BIF_RET(AM_unknown);
 	}
+    } else if (ERTS_IS_ATOM_STR("otp_correction_package", BIF_ARG_1)) {
+	int n = sizeof(ERLANG_OTP_CORRECTION_PACKAGE)-1;
+	hp = HAlloc(BIF_P, 2*n);
+	BIF_RET(buf_to_intlist(&hp, ERLANG_OTP_CORRECTION_PACKAGE, n, NIL));
     } else if (ERTS_IS_ATOM_STR("otp_release", BIF_ARG_1)) {
 	int n = sizeof(ERLANG_OTP_RELEASE)-1;
 	hp = HAlloc(BIF_P, 2*n);
@@ -2577,74 +2605,14 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	hp = hsz ? HAlloc(BIF_P, hsz) : NULL;
 	res = erts_bld_uint(&hp, NULL, erts_dist_buf_busy_limit);
 	BIF_RET(res);
-    } else if (ERTS_IS_ATOM_STR("print_ethread_info", BIF_ARG_1)) {
-#if defined(ETHR_NATIVE_ATOMIC32_IMPL) \
-    || defined(ETHR_NATIVE_ATOMIC64_IMPL) \
-    || defined(ETHR_NATIVE_DW_ATOMIC_IMPL)
-	int i;
-	char **str;
-#endif
-#ifdef ETHR_NATIVE_ATOMIC32_IMPL
-	erts_printf("32-bit native atomics: %s\n",
-		    ETHR_NATIVE_ATOMIC32_IMPL);
-	str = ethr_native_atomic32_ops();
-	for (i = 0; str[i]; i++)
-	    erts_printf("ethr_native_atomic32_%s()\n", str[i]);
-#endif
-#ifdef ETHR_NATIVE_ATOMIC64_IMPL
-	erts_printf("64-bit native atomics: %s\n",
-		    ETHR_NATIVE_ATOMIC64_IMPL);
-	str = ethr_native_atomic64_ops();
-	for (i = 0; str[i]; i++)
-	    erts_printf("ethr_native_atomic64_%s()\n", str[i]);
-#endif
-#ifdef ETHR_NATIVE_DW_ATOMIC_IMPL
-	if (ethr_have_native_dw_atomic()) {
-	    erts_printf("Double word native atomics: %s\n",
-			ETHR_NATIVE_DW_ATOMIC_IMPL);
-	    str = ethr_native_dw_atomic_ops();
-	    for (i = 0; str[i]; i++)
-		erts_printf("ethr_native_dw_atomic_%s()\n", str[i]);
-	    str = ethr_native_su_dw_atomic_ops();
-	    for (i = 0; str[i]; i++)
-		erts_printf("ethr_native_su_dw_atomic_%s()\n", str[i]);
-	}
-#endif
-#ifdef ETHR_NATIVE_SPINLOCK_IMPL
-	erts_printf("Native spin-locks: %s\n", ETHR_NATIVE_SPINLOCK_IMPL);
-#endif
-#ifdef ETHR_NATIVE_RWSPINLOCK_IMPL
-	erts_printf("Native rwspin-locks: %s\n", ETHR_NATIVE_RWSPINLOCK_IMPL);
-#endif
-#ifdef ETHR_X86_RUNTIME_CONF_HAVE_SSE2__
-	erts_printf("SSE2 support: %s\n", (ETHR_X86_RUNTIME_CONF_HAVE_SSE2__
-					   ? "yes" : "no"));
-#endif
-#ifdef ETHR_X86_OUT_OF_ORDER
-	erts_printf("x86"
-#ifdef ARCH_64
-		    "_64"
-#endif
-		    " out of order\n");
-#endif
-#ifdef ETHR_SPARC_TSO
-	erts_printf("Sparc TSO\n");
-#endif
-#ifdef ETHR_SPARC_PSO
-	erts_printf("Sparc PSO\n");
-#endif
-#ifdef ETHR_SPARC_RMO
-	erts_printf("Sparc RMO\n");
-#endif
-#if defined(ETHR_PPC_HAVE_LWSYNC)
-	erts_printf("Have lwsync instruction: yes\n");
-#elif defined(ETHR_PPC_HAVE_NO_LWSYNC)
-	erts_printf("Have lwsync instruction: no\n");
-#elif defined(ETHR_PPC_RUNTIME_CONF_HAVE_LWSYNC__)
-	erts_printf("Have lwsync instruction: %s (runtime test)\n",
-		    ETHR_PPC_RUNTIME_CONF_HAVE_LWSYNC__ ? "yes" : "no");
-#endif
-	BIF_RET(am_true);
+    } else if (ERTS_IS_ATOM_STR("ethread_info", BIF_ARG_1)) {
+	BIF_RET(erts_get_ethread_info(BIF_P));
+    }
+    else if (ERTS_IS_ATOM_STR("emu_args", BIF_ARG_1)) {
+	BIF_RET(erts_get_emu_args(BIF_P));
+    }
+    else if (ERTS_IS_ATOM_STR("beam_jump_table", BIF_ARG_1)) {
+	BIF_RET(erts_beam_jump_table() ? am_true : am_false);
     }
     else if (ERTS_IS_ATOM_STR("dynamic_trace", BIF_ARG_1)) {
 #if defined(USE_DTRACE)
@@ -2670,6 +2638,34 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	BIF_RET(am_true);
     }
 #endif
+    else if (ERTS_IS_ATOM_STR("compile_info",BIF_ARG_1)) {
+	Uint  sz;
+	Eterm res = NIL, tup, text;
+	Eterm *hp = HAlloc(BIF_P, 3*(2 + 3) + /* three 2-tuples and three cons */
+		2*(strlen(erts_build_flags_CONFIG_H) +
+		   strlen(erts_build_flags_CFLAGS) +
+		   strlen(erts_build_flags_LDFLAGS)));
+
+	sz   = strlen(erts_build_flags_CONFIG_H);
+	text = buf_to_intlist(&hp, erts_build_flags_CONFIG_H, sz, NIL);
+	tup  = TUPLE2(hp, am_config_h, text); hp += 3;
+	res  = CONS(hp, tup, res); hp += 2;
+
+	sz   = strlen(erts_build_flags_CFLAGS);
+	text = buf_to_intlist(&hp, erts_build_flags_CFLAGS, sz, NIL);
+	tup  = TUPLE2(hp, am_cflags, text); hp += 3;
+	res  = CONS(hp, tup, res); hp += 2;
+
+	sz   = strlen(erts_build_flags_LDFLAGS);
+	text = buf_to_intlist(&hp, erts_build_flags_LDFLAGS, sz, NIL);
+	tup  = TUPLE2(hp, am_ldflags, text); hp += 3;
+	res  = CONS(hp, tup, res); hp += 2;
+
+	BIF_RET(res);
+    }
+    else if (ERTS_IS_ATOM_STR("ets_limit",BIF_ARG_1)) {
+        BIF_RET(make_small(erts_db_get_max_tabs()));
+    }
 
     BIF_ERROR(BIF_P, BADARG);
 }
@@ -3320,6 +3316,9 @@ BIF_RETTYPE erts_debug_get_internal_state_1(BIF_ALIST_1)
 	    erts_smp_thr_progress_unblock();
 	    BIF_RET(res);
 	}
+        else if (ERTS_IS_ATOM_STR("mmap", BIF_ARG_1)) {
+            BIF_RET(erts_mmap_debug_info(BIF_P));
+        }
     }
     else if (is_tuple(BIF_ARG_1)) {
 	Eterm* tp = tuple_val(BIF_ARG_1);
@@ -3626,6 +3625,20 @@ BIF_RETTYPE erts_debug_set_internal_state_2(BIF_ALIST_2)
 		    erts_smp_proc_unlock(rp, ERTS_PROC_LOCK_MAIN);
 		BIF_RET(am_true);
 	    }
+	}
+	else if (ERTS_IS_ATOM_STR("gc_state", BIF_ARG_1)) {
+	    /* Used by process_SUITE (emulator) */
+	    int res, enable;
+
+	    switch (BIF_ARG_2) {
+	    case am_true: enable = 1; break;
+	    case am_false: enable = 0; break;
+	    default: BIF_ERROR(BIF_P, BADARG); break;
+	    }
+ 
+            res = (BIF_P->flags & F_DISABLE_GC) ? am_false : am_true;
+	    erts_set_gc_state(BIF_P, enable);
+	    BIF_RET(res);
 	}
 	else if (ERTS_IS_ATOM_STR("send_fake_exit_signal", BIF_ARG_1)) {
 	    /* Used by signal_SUITE (emulator) */

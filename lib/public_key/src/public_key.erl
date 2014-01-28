@@ -118,6 +118,13 @@ pem_entry_decode({Asn1Type, CryptDer, {Cipher, Salt}} = PemEntry,
 				is_list(Cipher) andalso
 				is_binary(Salt) andalso
 				erlang:byte_size(Salt) == 8 ->
+    do_pem_entry_decode(PemEntry, Password);
+pem_entry_decode({Asn1Type, CryptDer, {"AES-128-CBC"=Cipher, IV}} = PemEntry,
+		 Password) when is_atom(Asn1Type) andalso
+				is_binary(CryptDer) andalso
+				is_list(Cipher) andalso
+				is_binary(IV) andalso
+				erlang:byte_size(IV) == 16 ->
     do_pem_entry_decode(PemEntry, Password).
 
 %%--------------------------------------------------------------------
@@ -326,7 +333,7 @@ encrypt_private(PlainText,
     crypto:private_encrypt(rsa, PlainText, format_rsa_private_key(Key), Padding).
 
 %%--------------------------------------------------------------------
--spec generate_key(#'DHParameter'{} | {namedCurve, Name ::atom()} |
+-spec generate_key(#'DHParameter'{} | {namedCurve, Name ::oid()} |
 		   #'ECParameters'{}) -> {Public::binary(), Private::binary()} |
 					    #'ECPrivateKey'{}.
 %% Description: Generates a new keypair

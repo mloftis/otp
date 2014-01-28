@@ -28,11 +28,6 @@
 
 -include_lib("public_key/include/public_key.hrl").
 
--type oid()               :: tuple().
--type public_key_params() :: #'Dss-Parms'{} |  {namedCurve, oid()} | #'ECParameters'{} | term().
--type public_key_info()   :: {oid(), #'RSAPublicKey'{} | integer() | #'ECPoint'{}, public_key_params()}.
--type tls_handshake_history() :: {[binary()], [binary()]}.
-
 -define(NO_PROTOCOL, <<>>).
 
 %% Signature algorithms
@@ -50,7 +45,8 @@
 	  master_secret,
 	  srp_username,
 	  is_resumable,
-	  time_stamp
+	  time_stamp,
+	  ecc
 	  }).
 
 -define(NUM_OF_SESSION_ID_BYTES, 32).  % TSL 1.1 & SSL 3
@@ -96,17 +92,23 @@
 
 %% client_hello defined in tls_handshake.hrl and dtls_handshake.hrl
 
+-record(hello_extensions, {
+	  renegotiation_info,
+	  hash_signs,          % supported combinations of hashes/signature algos
+	  next_protocol_negotiation = undefined, % [binary()]
+	  srp,
+	  ec_point_formats,
+	  elliptic_curves,
+	  sni
+	 }).
+
 -record(server_hello, {
 	  server_version,
 	  random,             
 	  session_id,         % opaque SessionID<0..32>
 	  cipher_suite,       % cipher_suites
 	  compression_method, % compression_method
-	  renegotiation_info,
-	  hash_signs,          % supported combinations of hashes/signature algos
-	  ec_point_formats,    % supported ec point formats
-	  elliptic_curves,     % supported elliptic curver
-	  next_protocol_negotiation = undefined % [binary()]
+	  extensions
 	 }).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -337,7 +339,31 @@
 -define(EXPLICIT_CHAR2, 2).
 -define(NAMED_CURVE, 3).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Server name indication RFC 6066 section 3
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-define(SNI_EXT, 16#0000).
+
+%% enum { host_name(0), (255) } NameType;
+-define(SNI_NAMETYPE_HOST_NAME, 0).
+
+-record(sni, {
+          hostname = undefined
+        }).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Dialyzer types
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-type oid()               :: tuple().
+-type public_key_params() :: #'Dss-Parms'{} |  {namedCurve, oid()} | #'ECParameters'{} | term().
+-type public_key_info()   :: {oid(), #'RSAPublicKey'{} | integer() | #'ECPoint'{}, public_key_params()}.
+-type tls_handshake_history() :: {[binary()], [binary()]}.
+
+-type ssl_handshake() :: #server_hello{} | #server_hello_done{} | #certificate{} | #certificate_request{} |
+			 #client_key_exchange{} | #finished{} | #certificate_verify{} |
+			 #hello_request{} | #next_protocol{}.
+
+
 -endif. % -ifdef(ssl_handshake).
-
-
-     

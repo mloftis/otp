@@ -36,8 +36,7 @@ bool(Rules) ->
     case Rules of
 	ber ->
 	    [begin
-		 {error,{asn1,{encode_boolean,517}}} =
-		     (catch 'Prim':encode(T, 517))
+		 {error,{asn1,{encode_boolean,517}}} = enc_error(T, 517)
 	     end || T <- Types],
 	    ok;
 	_ ->
@@ -90,12 +89,12 @@ enum(Rules) ->
 
     roundtrip('Enum', monday),
     roundtrip('Enum', thursday),
-    {error,{asn1,{_,4}}} = (catch 'Prim':encode('Enum', 4)),
+    {error,{asn1,{_,4}}} = enc_error('Enum', 4),
 
     case Rules of
 	Per when Per =:= per; Per =:= uper ->
-	    {ok,<<0>>} = 'Prim':encode('SingleEnumVal', true),
-	    {ok,<<0>>} = 'Prim':encode('SingleEnumValExt', true);
+	    <<0>> = roundtrip('SingleEnumVal', true),
+	    <<0>> = roundtrip('SingleEnumValExt', true);
 	ber ->
 	    ok
     end,
@@ -128,15 +127,36 @@ null(_Rules) ->
     %%==========================================================
     %% Null ::= NULL
     %%==========================================================
-
-    {ok,Bytes1} = asn1_wrapper:encode('Prim','Null',monday),
-    {ok,'NULL'} = asn1_wrapper:decode('Prim','Null',lists:flatten(Bytes1)),
+    roundtrip('Null', monday, 'NULL'),
     ok.
 
 roundtrip(T, V) ->
-    {ok,E} = 'Prim':encode(T, V),
-    {ok,V} = 'Prim':decode(T, E),
-    E.
+    roundtrip(T, V, V).
+
+roundtrip(Type, Value, ExpectedValue) ->
+    case get(no_ok_wrapper) of
+	false ->
+	    asn1_test_lib:roundtrip_enc('Prim', Type, Value, ExpectedValue);
+	true ->
+	    M = 'Prim',
+	    Enc = M:encode(Type, Value),
+	    ExpectedValue = M:decode(Type, Enc),
+	    Enc
+    end.
+
+enc_error(T, V) ->
+    case get(no_ok_wrapper) of
+	false ->
+	    'Prim':encode(T, V);
+	true ->
+	    try 'Prim':encode(T, V) of
+		_ ->
+		    ?t:fail()
+	    catch
+		_:Reason ->
+		    Reason
+	    end
+    end.
 
 real(_Rules) ->
     %%==========================================================
@@ -144,67 +164,45 @@ real(_Rules) ->
     %%==========================================================
     
     %% Base 2
-    ?line {ok,Bytes1} = asn1_wrapper:encode('Real','AngleInRadians',{1,2,1}),
-    ?line {ok,{1,2,1}} = asn1_wrapper:decode('Real','AngleInRadians',Bytes1),
-
-    ?line {ok,Bytes2} = asn1_wrapper:encode('Real','AngleInRadians',{129,2,1}),
-    ?line {ok,{129,2,1}} = asn1_wrapper:decode('Real','AngleInRadians',Bytes2),
-
-    ?line {ok,Bytes3} = asn1_wrapper:encode('Real','AngleInRadians',{128,2,1}),
-    ?line {ok,{1,2,8}} = asn1_wrapper:decode('Real','AngleInRadians',Bytes3),
-
-    ?line {ok,Bytes4} = asn1_wrapper:encode('Real','AngleInRadians',{128,2,-7}),
-    ?line {ok,{1,2,0}} = asn1_wrapper:decode('Real','AngleInRadians',Bytes4),
-
-    ?line {ok,Bytes5} = asn1_wrapper:encode('Real','AngleInRadians',{16#f1f1f1,2,128}),
-    ?line {ok,{16#f1f1f1,2,128}} = asn1_wrapper:decode('Real','AngleInRadians',Bytes5),
+    real_roundtrip('AngleInRadians', {1,2,1}),
+    real_roundtrip('AngleInRadians', {129,2,1}),
+    real_roundtrip('AngleInRadians', {128,2,1}, {1,2,8}),
+    real_roundtrip('AngleInRadians', {128,2,-7}, {1,2,0}),
+    real_roundtrip('AngleInRadians', {16#f1f1f1,2,128}),
 
     %% Base 10, tuple format
-    ?line {ok,Bytes6} = asn1_wrapper:encode('Real','AngleInRadians',{1,10,1}),
-    ?line {ok,"1.E1"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes6),
-    
-    ?line {ok,Bytes7} = asn1_wrapper:encode('Real','AngleInRadians',{100,10,1}),
-    ?line {ok,"1.E3"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes7),
-
-    ?line {ok,Bytes8} = asn1_wrapper:encode('Real','AngleInRadians',{-100,10,1}),
-    ?line {ok,"-1.E3"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes8),
-
-    ?line {ok,Bytes9} = asn1_wrapper:encode('Real','AngleInRadians',{00002,10,1}),
-    ?line {ok,"2.E1"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes9),
-
-    ?line {ok,Bytes10} = asn1_wrapper:encode('Real','AngleInRadians',{123000,10,0}),
-    ?line {ok,"123.E3"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes10),
-
-    ?line {ok,Bytes11} = asn1_wrapper:encode('Real','AngleInRadians',{123456789,10,123456789}),
-    ?line {ok,"123456789.E123456789"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes11),
-
-    ?line {ok,Bytes12} = asn1_wrapper:encode('Real','AngleInRadians',{-12345,10,-12345}),
-    ?line {ok,"-12345.E-12345"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes12),
+    real_roundtrip('AngleInRadians', {1,10,1}, "1.E1"),
+    real_roundtrip('AngleInRadians', {100,10,1}, "1.E3"),
+    real_roundtrip('AngleInRadians', {-100,10,1}, "-1.E3"),
+    real_roundtrip('AngleInRadians', {2,10,1}, "2.E1"),
+    real_roundtrip('AngleInRadians', {123000,10,0}, "123.E3"),
+    real_roundtrip('AngleInRadians', {123456789,10,123456789},
+		   "123456789.E123456789" ),
+    real_roundtrip('AngleInRadians', {-12345,10,-12345}, "-12345.E-12345"),
 
     %% Base 10, string format NR3
-    
-    ?line {ok,Bytes13} = asn1_wrapper:encode('Real','AngleInRadians',"123.123E123"),
-    ?line {ok,"123123.E120"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes13),
 
-    ?line {ok,Bytes14} = asn1_wrapper:encode('Real','AngleInRadians',"0.0E0"),
-    ?line {ok,"0.E+0"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes14),
+    real_roundtrip('AngleInRadians', "123.123E123", "123123.E120"),
+    real_roundtrip('AngleInRadians', "0.0E0", "0.E+0"),
+    real_roundtrip('AngleInRadians', "0.0123", "123.E-4"),
+    real_roundtrip('AngleInRadians', "0", "0.E+0"),
+    real_roundtrip('AngleInRadians', "-123.45", "-12345.E-2"),
+    real_roundtrip('AngleInRadians', "123456789E123456789",
+		   "123456789.E123456789"),
+    real_roundtrip('AngleInRadians', "01.000E1", "1.E1"),
+    real_roundtrip('AngleInRadians', "120.0001", "1200001.E-4"),
 
-    ?line {ok,Bytes15} = asn1_wrapper:encode('Real','AngleInRadians',"0.0123"),
-    ?line {ok,"123.E-4"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes15),
+    ok.
 
-    ?line {ok,Bytes16} = asn1_wrapper:encode('Real','AngleInRadians',"0"),
-    ?line {ok,"0.E+0"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes16),
-    
-    ?line {ok,Bytes17} = asn1_wrapper:encode('Real','AngleInRadians',"-123.45"),
-    ?line {ok,"-12345.E-2"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes17),
+real_roundtrip(T, V) ->
+    real_roundtrip(T, V, V).
 
-    ?line {ok,Bytes18} = 
-	asn1_wrapper:encode('Real','AngleInRadians',"123456789E123456789"),
-    ?line {ok,"123456789.E123456789"} = 
-	asn1_wrapper:decode('Real','AngleInRadians',Bytes18),
-
-    ?line {ok,Bytes19} = asn1_wrapper:encode('Real','AngleInRadians',"01.000E1"),
-    ?line {ok,"1.E1"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes19),
-
-    ?line {ok,Bytes20} = asn1_wrapper:encode('Real','AngleInRadians',"120.0001"),
-    ?line {ok,"1200001.E-4"} = asn1_wrapper:decode('Real','AngleInRadians',Bytes20).
+real_roundtrip(Type, Value, ExpectedValue) ->
+    case get(no_ok_wrapper) of
+	false ->
+	    asn1_test_lib:roundtrip('Real', Type, Value, ExpectedValue);
+	true ->
+	    M = 'Real',
+	    ExpectedValue = M:decode(Type, M:encode(Type, Value)),
+	    ok
+    end.

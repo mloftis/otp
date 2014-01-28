@@ -133,7 +133,7 @@ typedef struct {
 
 #define ERL_DRV_EXTENDED_MARKER		(0xfeeeeeed)
 #define ERL_DRV_EXTENDED_MAJOR_VERSION	2
-#define ERL_DRV_EXTENDED_MINOR_VERSION	1
+#define ERL_DRV_EXTENDED_MINOR_VERSION	2
 
 /*
  * The emulator will refuse to load a driver with different major
@@ -365,17 +365,23 @@ typedef struct erl_drv_entry {
  * It must initialize a ErlDrvEntry structure and return a pointer to it.
  */
 
+#ifdef STATIC_ERLANG_DRIVER
+#  define ERLANG_DRIVER_NAME(NAME) NAME ## _driver_init
+#else
+#  define ERLANG_DRIVER_NAME(NAME) driver_init
+#endif
+
 /* For windows dynamic drivers */
 #ifndef ERL_DRIVER_TYPES_ONLY
 
 #if defined(__WIN32__)
 #  define DRIVER_INIT(DRIVER_NAME) \
-    __declspec(dllexport) ErlDrvEntry* driver_init(void); \
-    __declspec(dllexport) ErlDrvEntry* driver_init(void)
+  __declspec(dllexport) ErlDrvEntry* ERLANG_DRIVER_NAME(DRIVER_NAME)(void);	\
+    __declspec(dllexport) ErlDrvEntry* ERLANG_DRIVER_NAME(DRIVER_NAME)(void)
 #else 
 #  define DRIVER_INIT(DRIVER_NAME) \
-    ErlDrvEntry* driver_init(void); \
-    ErlDrvEntry* driver_init(void)
+    ErlDrvEntry* ERLANG_DRIVER_NAME(DRIVER_NAME)(void); \
+    ErlDrvEntry* ERLANG_DRIVER_NAME(DRIVER_NAME)(void)
 #endif
 
 #define ERL_DRV_BUSY_MSGQ_DISABLED	(~((ErlDrvSizeT) 0))
@@ -546,6 +552,11 @@ EXTERN int erl_drv_equal_tids(ErlDrvTid tid1, ErlDrvTid tid2);
 EXTERN void erl_drv_thread_exit(void *resp);
 EXTERN int erl_drv_thread_join(ErlDrvTid, void **respp);
 
+EXTERN char* erl_drv_mutex_name(ErlDrvMutex *mtx);
+EXTERN char* erl_drv_cond_name(ErlDrvCond *cnd);
+EXTERN char* erl_drv_rwlock_name(ErlDrvRWLock *rwlck);
+EXTERN char* erl_drv_thread_name(ErlDrvTid tid);
+
 /*
  * Misc.
  */
@@ -638,6 +649,8 @@ EXTERN int erl_drv_send_term(ErlDrvTermData port,
 			     int len);
 
 /* Async IO functions */
+EXTERN unsigned int driver_async_port_key(ErlDrvPort port);
+
 EXTERN long driver_async(ErlDrvPort ix,
 			 unsigned int* key,
 			 void (*async_invoke)(void*), 
@@ -681,6 +694,3 @@ EXTERN int erl_drv_getenv(char *key, char *value, size_t *value_size);
 
 /* also in global.h, but driver's can't include global.h */
 void dtrace_drvport_str(ErlDrvPort port, char *port_buf);
-
-
-
