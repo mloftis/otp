@@ -9720,6 +9720,7 @@
                  {logical_processors_online,4},
                  {logical_processors_available,4},
                  {driver_version,"2.1"},
+                 {nif_version,"1.1"},
                  {taints,[]}]},
                {erts_compile_info,
                 [{ldflags,[]},
@@ -9870,4 +9871,5 @@
                  {"MANPATH",
                   "/usr/local/man:/usr/share/man:/usr/X11R6/man:/opt/gnome/share/man"},
                  {"LESSKEY","/etc/lesskey.bin"},
-                 {"LC_PAPER","sv_SE.UTF-8"}]}]}.
+                 {"LC_PAPER","sv_SE.UTF-8"}]},
+		{sanity_check,ok}]}.

@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2012-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2012-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -30,6 +31,7 @@
 	 decode_big_chars/2,
 	 decode_oid/1,decode_relative_oid/1,
 	 encode_chars/2,encode_chars/3,
+	 encode_chars_compact_map/3,
 	 encode_chars_16bit/1,encode_big_chars/1,
 	 encode_fragmented/2,
 	 encode_oid/1,encode_relative_oid/1,
@@ -37,8 +39,10 @@
 	 bitstring_from_positions/1,bitstring_from_positions/2,
 	 to_bitstring/1,to_bitstring/2,
 	 to_named_bitstring/1,to_named_bitstring/2,
-	 is_default_bitstring/5,
-	 extension_bitmap/3]).
+	 bs_drop_trailing_zeroes/1,adjust_trailing_zeroes/2,
+	 is_default_bitstring/3,is_default_bitstring/5,
+	 extension_bitmap/3,
+	 open_type_to_binary/1,legacy_open_type_to_binary/1]).
 
 -define('16K',16384).
 
@@ -105,6 +109,9 @@ encode_chars(Val, NumBits) ->
 
 encode_chars(Val, NumBits, {Lb,Tab}) ->
     << <<(enc_char(C, Lb, Tab)):NumBits>> || C <- Val >>.
+
+encode_chars_compact_map(Val, NumBits, {Lb,Limit}) ->
+    << <<(enc_char_cm(C, Lb, Limit)):NumBits>> || C <- Val >>.
 
 encode_chars_16bit(Val) ->
     L = [case C of
@@ -272,6 +279,25 @@ to_named_bitstring(Val, Lb) ->
     %% for correctness, not speed.
     adjust_trailing_zeroes(to_bitstring(Val), Lb).
 
+is_default_bitstring(asn1_DEFAULT, _, _) ->
+    true;
+is_default_bitstring(Named, Named, _) ->
+    true;
+is_default_bitstring(Bs, _, Bs) ->
+    true;
+is_default_bitstring(Val, _, Def) when is_bitstring(Val) ->
+    Sz = bit_size(Def),
+    case Val of
+	<<Def:Sz/bitstring,T/bitstring>> ->
+	    NumZeroes = bit_size(T),
+	    case T of
+		<<0:NumZeroes>> -> true;
+		_ -> false
+	    end;
+	_ ->
+	    false
+    end.
+
 is_default_bitstring(asn1_DEFAULT, _, _, _, _) ->
     true;
 is_default_bitstring({Unused,Bin}, V0, V1, V2, V3) when is_integer(Unused) ->
@@ -305,6 +331,16 @@ is_default_bitstring(_, _, _, _, _) -> false.
 
 extension_bitmap(Val, Pos, Limit) ->
     extension_bitmap(Val, Pos, Limit, 0).
+
+open_type_to_binary({asn1_OPENTYPE,Bin}) when is_binary(Bin) ->
+    Bin.
+
+legacy_open_type_to_binary({asn1_OPENTYPE,Bin}) when is_binary(Bin) ->
+    Bin;
+legacy_open_type_to_binary(Bin) when is_binary(Bin) ->
+    Bin;
+legacy_open_type_to_binary(List) when is_list(List) ->
+    List.
 
 %%%
 %%% Internal functions.
@@ -349,6 +385,15 @@ enc_char(C0, Lb, Tab) ->
 	    C
     catch
 	error:badarg ->
+	    illegal_char_error()
+    end.
+
+enc_char_cm(C0, Lb, Limit) ->
+    C = C0 - Lb,
+    if
+	0 =< C, C < Limit ->
+	    C;
+	true ->
 	    illegal_char_error()
     end.
 
@@ -438,6 +483,8 @@ adjust_trailing_zeroes(Bs0, Lb) ->
 bs_drop_trailing_zeroes(Bs) ->
     bs_drop_trailing_zeroes(Bs, bit_size(Bs)).
 
+bs_drop_trailing_zeroes(Bs, 0) ->
+    Bs;
 bs_drop_trailing_zeroes(Bs0, Sz0) when Sz0 < 8 ->
     <<Byte:Sz0>> = Bs0,
     Sz = Sz0 - ntz(Byte),

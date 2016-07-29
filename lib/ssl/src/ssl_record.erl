@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2013-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2013-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 
@@ -29,7 +30,7 @@
 -include("ssl_alert.hrl").
 
 %% Connection state handling
--export([init_connection_states/1,
+-export([init_connection_states/2,
 	 current_connection_state/2, pending_connection_state/2,
 	 activate_pending_connection_state/2,
 	 set_security_params/3,
@@ -48,23 +49,31 @@
 -export([compress/3, uncompress/3, compressions/0]).
 
 %% Payload encryption/decryption
--export([cipher/4, decipher/3, is_correct_mac/2]).
+-export([cipher/4, decipher/4, is_correct_mac/2,
+	 cipher_aead/4, decipher_aead/4]).
+
+-export_type([ssl_version/0, ssl_atom_version/0]).
+
+-type ssl_version()       :: {integer(), integer()}.
+-type ssl_atom_version() :: tls_record:tls_atom_version().
 
 %%====================================================================
 %% Internal application API
 %%====================================================================
 
 %%--------------------------------------------------------------------
--spec init_connection_states(client | server) -> #connection_states{}.
+-spec init_connection_states(client | server, one_n_minus_one | zero_n | disabled ) ->
+				      #connection_states{}.
 %%
 %% Description: Creates a connection_states record with appropriate
 %% values for the initial SSL connection setup.
 %%--------------------------------------------------------------------
-init_connection_states(Role) ->
+init_connection_states(Role, BeastMitigation) ->
     ConnectionEnd = record_protocol_role(Role),
-    Current = initial_connection_state(ConnectionEnd),
-    Pending = empty_connection_state(ConnectionEnd),
-    #connection_states{current_read = Current,
+    Current = initial_connection_state(ConnectionEnd, BeastMitigation),
+    Pending = empty_connection_state(ConnectionEnd, BeastMitigation),
+    #connection_states{dtls_write_msg_seq = 1, % only used by dtls
+		       current_read = Current,
 		       pending_read = Pending,
 		       current_write = Current,
 		       pending_write = Pending
@@ -112,9 +121,10 @@ activate_pending_connection_state(States =
                                   read) ->
     NewCurrent = Pending#connection_state{epoch = dtls_next_epoch(Current),
 					  sequence_number = 0},
+    BeastMitigation = Pending#connection_state.beast_mitigation,
     SecParams = Pending#connection_state.security_parameters,
     ConnectionEnd = SecParams#security_parameters.connection_end,
-    EmptyPending = empty_connection_state(ConnectionEnd),
+    EmptyPending = empty_connection_state(ConnectionEnd, BeastMitigation),
     SecureRenegotation = NewCurrent#connection_state.secure_renegotiation,
     NewPending = EmptyPending#connection_state{secure_renegotiation = SecureRenegotation},
     States#connection_states{current_read = NewCurrent,
@@ -127,9 +137,10 @@ activate_pending_connection_state(States =
                                   write) ->
     NewCurrent = Pending#connection_state{epoch = dtls_next_epoch(Current),
 					  sequence_number = 0},
+    BeastMitigation = Pending#connection_state.beast_mitigation,
     SecParams = Pending#connection_state.security_parameters,
     ConnectionEnd = SecParams#security_parameters.connection_end,
-    EmptyPending = empty_connection_state(ConnectionEnd),
+    EmptyPending = empty_connection_state(ConnectionEnd, BeastMitigation),
     SecureRenegotation = NewCurrent#connection_state.secure_renegotiation,
     NewPending = EmptyPending#connection_state{secure_renegotiation = SecureRenegotation},
     States#connection_states{current_write = NewCurrent,
@@ -299,16 +310,38 @@ set_pending_cipher_state(#connection_states{pending_read = Read,
 
 
 %%--------------------------------------------------------------------
--spec encode_handshake(iolist(), tls_version(), #connection_states{}) ->
+-spec encode_handshake(iolist(), ssl_version(), #connection_states{}) ->
 			      {iolist(), #connection_states{}}.
 %%
 %% Description: Encodes a handshake message to send on the ssl-socket.
 %%--------------------------------------------------------------------
+encode_handshake(Frag, Version, 
+		 #connection_states{current_write = 
+					#connection_state{
+					   beast_mitigation = BeastMitigation,
+					   security_parameters =
+					       #security_parameters{bulk_cipher_algorithm = BCA}}} = 
+		     ConnectionStates)
+when is_list(Frag) ->
+    case iolist_size(Frag) of
+	N  when N > ?MAX_PLAIN_TEXT_LENGTH ->
+	    Data = split_bin(iolist_to_binary(Frag), ?MAX_PLAIN_TEXT_LENGTH, Version, BCA, BeastMitigation),
+	    encode_iolist(?HANDSHAKE, Data, Version, ConnectionStates);
+	_  ->
+	    encode_plain_text(?HANDSHAKE, Version, Frag, ConnectionStates)
+    end;
+%% TODO: this is a workarround for DTLS
+%%
+%% DTLS need to select the connection write state based on Epoch it wants to
+%% send this fragment in. That Epoch does not nessarily has to be the same
+%% as the current_write epoch.
+%% The right solution might be to pass the WriteState instead of the ConnectionStates,
+%% however, this will require substantion API changes.
 encode_handshake(Frag, Version, ConnectionStates) ->
     encode_plain_text(?HANDSHAKE, Version, Frag, ConnectionStates).
 
 %%--------------------------------------------------------------------
--spec encode_alert_record(#alert{}, tls_version(), #connection_states{}) ->
+-spec encode_alert_record(#alert{}, ssl_version(), #connection_states{}) ->
 				 {iolist(), #connection_states{}}.
 %%
 %% Description: Encodes an alert message to send on the ssl-socket.
@@ -319,7 +352,7 @@ encode_alert_record(#alert{level = Level, description = Description},
 		      ConnectionStates).
 
 %%--------------------------------------------------------------------
--spec encode_change_cipher_spec(tls_version(), #connection_states{}) ->
+-spec encode_change_cipher_spec(ssl_version(), #connection_states{}) ->
 				       {iolist(), #connection_states{}}.
 %%
 %% Description: Encodes a change_cipher_spec-message to send on the ssl socket.
@@ -328,17 +361,18 @@ encode_change_cipher_spec(Version, ConnectionStates) ->
     encode_plain_text(?CHANGE_CIPHER_SPEC, Version, <<1:8>>, ConnectionStates).
 
 %%--------------------------------------------------------------------
--spec encode_data(binary(), tls_version(), #connection_states{}) ->
+-spec encode_data(binary(), ssl_version(), #connection_states{}) ->
 			 {iolist(), #connection_states{}}.
 %%
 %% Description: Encodes data to send on the ssl-socket.
 %%--------------------------------------------------------------------
 encode_data(Frag, Version,
 	    #connection_states{current_write = #connection_state{
+				 beast_mitigation = BeastMitigation,
 				 security_parameters =
 				     #security_parameters{bulk_cipher_algorithm = BCA}}} =
 		ConnectionStates) ->
-    Data = split_bin(Frag, ?MAX_PLAIN_TEXT_LENGTH, Version, BCA),
+    Data = split_bin(Frag, ?MAX_PLAIN_TEXT_LENGTH, Version, BCA, BeastMitigation),
     encode_iolist(?APPLICATION_DATA, Data, Version, ConnectionStates).
 
 uncompress(?NULL, Data, CS) ->
@@ -356,7 +390,7 @@ compressions() ->
     [?byte(?NULL)].
 
 %%--------------------------------------------------------------------
--spec cipher(tls_version(), iolist(), #connection_state{}, MacHash::binary()) ->
+-spec cipher(ssl_version(), iodata(), #connection_state{}, MacHash::binary()) ->
 		    {CipherFragment::binary(), #connection_state{}}.
 %%
 %% Description: Payload encryption
@@ -372,7 +406,25 @@ cipher(Version, Fragment,
 	ssl_cipher:cipher(BulkCipherAlgo, CipherS0, MacHash, Fragment, Version),
     {CipherFragment,  WriteState0#connection_state{cipher_state = CipherS1}}.
 %%--------------------------------------------------------------------
--spec decipher(tls_version(), binary(), #connection_state{}) -> {binary(), binary(), #connection_state{}}.
+-spec cipher_aead(ssl_version(), iodata(), #connection_state{}, MacHash::binary()) ->
+			 {CipherFragment::binary(), #connection_state{}}.
+%%
+%% Description: Payload encryption
+%%--------------------------------------------------------------------
+cipher_aead(Version, Fragment,
+       #connection_state{cipher_state = CipherS0,
+			 sequence_number = SeqNo,
+			 security_parameters=
+			     #security_parameters{bulk_cipher_algorithm =
+						      BulkCipherAlgo}
+			} = WriteState0, AAD) ->
+
+    {CipherFragment, CipherS1} =
+	ssl_cipher:cipher_aead(BulkCipherAlgo, CipherS0, SeqNo, AAD, Fragment, Version),
+    {CipherFragment,  WriteState0#connection_state{cipher_state = CipherS1}}.
+
+%%--------------------------------------------------------------------
+-spec decipher(ssl_version(), binary(), #connection_state{}, boolean()) -> {binary(), binary(), #connection_state{}} | #alert{}.
 %%
 %% Description: Payload decryption
 %%--------------------------------------------------------------------
@@ -382,8 +434,8 @@ decipher(Version, CipherFragment,
 							BulkCipherAlgo,
 						    hash_size = HashSz},
 			   cipher_state = CipherS0
-			  } = ReadState) ->
-    case ssl_cipher:decipher(BulkCipherAlgo, HashSz, CipherS0, CipherFragment, Version) of
+			  } = ReadState, PaddingCheck) ->
+    case ssl_cipher:decipher(BulkCipherAlgo, HashSz, CipherS0, CipherFragment, Version, PaddingCheck) of
 	{PlainFragment, Mac, CipherS1} ->
 	    CS1 = ReadState#connection_state{cipher_state = CipherS1},
 	    {PlainFragment, Mac, CS1};
@@ -391,11 +443,31 @@ decipher(Version, CipherFragment,
 	    Alert
     end.
 %%--------------------------------------------------------------------
+-spec decipher_aead(ssl_version(), binary(), #connection_state{}, binary()) -> {binary(), binary(), #connection_state{}} | #alert{}.
+%%
+%% Description: Payload decryption
+%%--------------------------------------------------------------------
+decipher_aead(Version, CipherFragment,
+	 #connection_state{sequence_number = SeqNo,
+			   security_parameters =
+			       #security_parameters{bulk_cipher_algorithm =
+							BulkCipherAlgo},
+			   cipher_state = CipherS0
+			  } = ReadState, AAD) ->
+    case ssl_cipher:decipher_aead(BulkCipherAlgo, CipherS0, SeqNo, AAD, CipherFragment, Version) of
+	{PlainFragment, CipherS1} ->
+	    CS1 = ReadState#connection_state{cipher_state = CipherS1},
+	    {PlainFragment, CS1};
+	#alert{} = Alert ->
+	    Alert
+    end.
+%%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-empty_connection_state(ConnectionEnd) ->
+empty_connection_state(ConnectionEnd, BeastMitigation) ->
     SecParams = empty_security_params(ConnectionEnd),
-    #connection_state{security_parameters = SecParams}.
+    #connection_state{security_parameters = SecParams,
+                      beast_mitigation = BeastMitigation}.
 
 empty_security_params(ConnectionEnd = ?CLIENT) ->
     #security_parameters{connection_end = ConnectionEnd,
@@ -406,7 +478,7 @@ empty_security_params(ConnectionEnd = ?SERVER) ->
 random() ->
     Secs_since_1970 = calendar:datetime_to_gregorian_seconds(
 			calendar:universal_time()) - 62167219200,
-    Random_28_bytes = crypto:rand_bytes(28),
+    Random_28_bytes = ssl_cipher:random_bytes(28),
     <<?UINT32(Secs_since_1970), Random_28_bytes/binary>>.
 
 dtls_next_epoch(#connection_state{epoch = undefined}) -> %% SSL/TLS
@@ -424,10 +496,11 @@ record_protocol_role(client) ->
 record_protocol_role(server) ->
     ?SERVER.
 
-initial_connection_state(ConnectionEnd) ->
+initial_connection_state(ConnectionEnd, BeastMitigation) ->
     #connection_state{security_parameters =
 			  initial_security_params(ConnectionEnd),
-                      sequence_number = 0
+                      sequence_number = 0,
+                      beast_mitigation = BeastMitigation
                      }.
 
 initial_security_params(ConnectionEnd) ->
@@ -452,11 +525,17 @@ encode_iolist(Type, Data, Version, ConnectionStates0) ->
 
 %% 1/n-1 splitting countermeasure Rizzo/Duong-Beast, RC4 chiphers are
 %% not vulnerable to this attack.
-split_bin(<<FirstByte:8, Rest/binary>>, ChunkSize, Version, BCA) when
+split_bin(<<FirstByte:8, Rest/binary>>, ChunkSize, Version, BCA, one_n_minus_one) when
       BCA =/= ?RC4 andalso ({3, 1} == Version orelse
 			    {3, 0} == Version) ->
     do_split_bin(Rest, ChunkSize, [[FirstByte]]);
-split_bin(Bin, ChunkSize, _, _) ->
+%% 0/n splitting countermeasure for clients that are incompatible with 1/n-1
+%% splitting.
+split_bin(Bin, ChunkSize, Version, BCA, zero_n) when
+      BCA =/= ?RC4 andalso ({3, 1} == Version orelse
+			    {3, 0} == Version) ->
+    do_split_bin(Bin, ChunkSize, [[<<>>]]);
+split_bin(Bin, ChunkSize, _, _, _) ->
     do_split_bin(Bin, ChunkSize, []).
 
 do_split_bin(<<>>, _, Acc) ->

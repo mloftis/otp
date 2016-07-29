@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2008-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2008-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%%-------------------------------------------------------------------
@@ -36,8 +37,8 @@
 	 terminate/2, code_change/3]).
 
 -record(state, {port,cb_port,users,cleaners=[],cb,cb_cnt}).
--record(user,  {events=[], evt_handler}).
--record(event, {object, callback, cb_handler}).
+-record(user,  {events=[]}).
+%%-record(event, {object, callback, cb_handler}).
 
 -define(APPLICATION, wxe).
 -define(log(S,A), log(?MODULE,?LINE,S,A)).
@@ -119,7 +120,7 @@ handle_call(stop,{_From,_},State = #state{users=Users0, cleaners=Cs0}) ->
     Env = get(?WXE_IDENTIFIER),
     Users = gb_trees:to_list(Users0),
     Cs = lists:map(fun({_Pid,User}) ->
-			   spawn_link(fun() -> cleanup(Env,[User], false) end)
+			   spawn_link(fun() -> cleanup(Env,[User]) end)
 		   end, Users),
     {noreply, State#state{users=gb_trees:empty(), cleaners=Cs ++ Cs0}};
 
@@ -178,30 +179,19 @@ handle_info({'DOWN',_,process,Pid,_}, State=#state{users=Users0,cleaners=Cs}) ->
 	Users = gb_trees:delete(Pid,Users0),
 	Env = wx:get_env(),
 	case User of
-	    #user{events=[], evt_handler=undefined} -> %% No need to spawn
+	    #user{events=[]} -> %% No need to spawn
 		case Cs =:= [] andalso gb_trees:is_empty(Users) of
-		    true  -> {stop, normal, State#state{cleaners=Cs}};
-		    false -> {noreply, State#state{users=Users,cleaners=Cs}}
+		    true  -> {stop, normal, State#state{users=Users}};
+		    false -> {noreply, State#state{users=Users}}
 		end;
 	    _ ->
-		Cleaner = spawn_link(fun() -> cleanup(Env,[User],true) end),
+		Cleaner = spawn_link(fun() -> cleanup(Env,[User]) end),
 		{noreply, State#state{users=Users,cleaners=[Cleaner|Cs]}}
 	end
     catch  _E:_R ->
 	    %% ?log("Error: ~p ~p", [_E,_R]),
 	    {noreply, State}
     end;
-
-handle_info(Msg = {'_wxe_destroy_', Pid}, State)
-  when is_pid(Pid) ->
-    case erlang:is_process_alive(Pid) of
-	true ->
-	    Pid ! Msg,
-	    ok;
-	false ->
-	    ok
-    end,
-    {noreply, State};
 
 handle_info(_Info, State) ->
     ?log("Unknown message ~p sent to ~p~n",[_Info, ?MODULE]),
@@ -222,40 +212,36 @@ code_change(_OldVsn, State, _Extra) ->
 log(Mod,Line,Str,Args) ->
     error_logger:format("~p:~p: " ++ Str, [Mod,Line|Args]).
 
-handle_connect(Object, EvData, From, State0 = #state{users=Users}) ->
-    User0 = #user{events=Evs0,evt_handler=Handler0} = gb_trees:get(From, Users),
-    Callback = wxEvtHandler:get_callback(EvData),
-    case Handler0 of
-	#wx_ref{} when Callback =:= 0 ->
-	    CBHandler = Handler0,
-	    Handler = Handler0;
-	undefined when Callback =:= 0 ->
-	    Handler = new_evt_listener(State0, From),
-	    CBHandler = Handler;
-	_ ->
-	    CBHandler = new_evt_listener(State0, From),
-	    Handler = Handler0
-    end,
-    Evs = [#event{object=Object,callback=Callback, cb_handler=CBHandler}|Evs0],
-    User = User0#user{events=Evs, evt_handler=Handler},
-    State1 = State0#state{users=gb_trees:update(From, User, Users)},
-    if is_function(Callback) orelse is_pid(Callback) ->
-	    {FunId, State} = attach_fun(Callback,State1),
-	    Res = wxEvtHandler:connect_impl(CBHandler,Object,
-					    wxEvtHandler:replace_fun_with_id(EvData,FunId)),
-	    case Res of
-		ok     -> {reply,Res,State};
-		_Error -> {reply,Res,State0}
-	    end;
-
-       true ->
-	    Res = {call_impl, connect_cb, CBHandler},
-	    {reply, Res, State1}
+handle_connect(Object, #evh{handler=undefined, cb=Callback} = EvData0, 
+	       From, State0) ->
+    %% Callback let this process listen to the events
+    {FunId, State} = attach_fun(Callback,State0),
+    EvData1 = EvData0#evh{cb=FunId},
+    case wxEvtHandler:connect_impl(Object,EvData1) of
+	{ok, Handler} ->
+	    EvData = EvData1#evh{handler=Handler,userdata=undefined},
+	    handle_connect(Object, EvData, From, State);
+	Error ->
+	    {reply, Error, State0}
+    end;
+handle_connect(Object, EvData=#evh{handler=Handler},
+	       From, State0 = #state{users=Users}) ->
+    %% Correct process is already listening just register it
+    put(Handler, From),
+    case gb_trees:lookup(From, Users) of
+	{value, User0 = #user{events=Listeners0}} ->
+	    User  = User0#user{events=[{Object,EvData}|Listeners0]},
+	    State = State0#state{users=gb_trees:update(From, User, Users)},
+	    {reply, ok, State};
+	none -> %% We are closing up the shop
+	    {reply, {error, terminating}, State0}
     end.
 
 invoke_cb({{Ev=#wx{}, Ref=#wx_ref{}}, FunId,_}, _S) ->
     %% Event callbacks
     case get(FunId) of
+	{{nospawn, Fun}, _} when is_function(Fun) ->
+	    invoke_callback_fun(fun() -> Fun(Ev, Ref), <<>> end);
 	{Fun,_} when is_function(Fun) ->
 	    invoke_callback(fun() -> Fun(Ev, Ref), <<>> end);
 	{Pid,_} when is_pid(Pid) -> %% wx_object sync event
@@ -274,21 +260,10 @@ invoke_cb({FunId, Args, _}, _S) when is_list(Args), is_integer(FunId) ->
 
 invoke_callback(Fun) ->
     Env = get(?WXE_IDENTIFIER),
-    CB = fun() ->
-		 wx:set_env(Env),
-		 wxe_util:cast(?WXE_CB_START, <<>>),
-		 Res = try
-			   Return = Fun(),
-			   true = is_binary(Return),
-			   Return
-		       catch _:Reason ->
-			       ?log("Callback fun crashed with {'EXIT, ~p, ~p}~n",
-				    [Reason, erlang:get_stacktrace()]),
-			       <<>>
-		       end,
-		 wxe_util:cast(?WXE_CB_RETURN, Res)
-	 end,
-    spawn(CB),
+    spawn(fun() ->
+		  wx:set_env(Env),
+		  invoke_callback_fun(Fun)
+	  end),
     ok.
 
 invoke_callback(Pid, Ev, Ref) ->
@@ -297,7 +272,7 @@ invoke_callback(Pid, Ev, Ref) ->
 		 wx:set_env(Env),
 		 wxe_util:cast(?WXE_CB_START, <<>>),
 		 try
-		     case get_wx_object_state(Pid) of
+		     case get_wx_object_state(Pid, 5) of
 			 ignore ->
 			     %% Ignore early events
 			     wxEvent:skip(Ref);
@@ -318,30 +293,38 @@ invoke_callback(Pid, Ev, Ref) ->
     spawn(CB),
     ok.
 
-get_wx_object_state(Pid) ->
+invoke_callback_fun(Fun) ->
+    wxe_util:cast(?WXE_CB_START, <<>>),
+    Res = try
+	      Return = Fun(),
+	      true = is_binary(Return),
+	      Return
+	  catch _:Reason ->
+		  ?log("Callback fun crashed with {'EXIT, ~p, ~p}~n",
+		       [Reason, erlang:get_stacktrace()]),
+		  <<>>
+	  end,
+    wxe_util:cast(?WXE_CB_RETURN, Res).
+
+
+get_wx_object_state(Pid, N) when N > 0 ->
     case process_info(Pid, dictionary) of
 	{dictionary, Dict} ->
 	    case lists:keysearch('_wx_object_',1,Dict) of
-		{value, {'_wx_object_', {_Mod, '_wx_init_'}}} -> ignore;
-		{value, {'_wx_object_', Value}} -> Value;
-		_ -> ignore
+		{value, {'_wx_object_', {_Mod, '_wx_init_'}}} ->
+		    timer:sleep(50),
+		    get_wx_object_state(Pid, N-1);
+		{value, {'_wx_object_', Value}} ->
+		    Value;
+		_ ->
+		    ignore
 	    end;
-	_ -> ignore
-    end.
+	_ ->
+	    ignore
+    end;
+get_wx_object_state(_, _) ->
+    ignore.
 
-new_evt_listener(State, Owner) ->
-    #wx_env{port=Port} = wx:get_env(),
-    _ = erlang:port_control(Port,98,<<>>),
-    Listener = get_result(State),
-    put(Listener, Owner),
-    Listener.
-
-get_result(_State) ->
-    receive
-	{'_wxe_result_', Res} -> Res;
-	{'_wxe_error_', Op, Error} ->
-	    erlang:error({Error, {wxEvtHandler, {internal_installer, Op}}})
-    end.
 
 attach_fun(Fun, S = #state{cb=CB,cb_cnt=Next}) ->
     case gb_trees:lookup(Fun,CB) of
@@ -367,90 +350,55 @@ delete_fun(FunId, State = #state{cb=CB}) ->
 	    State
     end.
 
-cleanup_evt_listener(U=#user{events=Evs0,evt_handler=Handler}, EvtListener, Object) ->
-    {Evs, Del} = lists:foldl(fun(#event{object=Obj,cb_handler=CBH}, {Acc, Delete})
-				   when CBH =:= EvtListener, Obj =:= Object ->
-				     {Acc, Delete};
-				(Event = #event{cb_handler=CBH}, {Acc, _Delete})
-				   when CBH =:= EvtListener ->
-				     {[Event|Acc], false};
-				(Event, {Acc, Delete}) ->
-				     {[Event|Acc], Delete}
-			     end, {[], true}, Evs0),
-    Del andalso wxEvtHandler:destroy_evt_listener(EvtListener),
-    case Del andalso Handler =:= EvtListener of
-	true ->
-	    U#user{events=Evs, evt_handler=undefined};
-	false ->
-	    U#user{events=Evs}
-    end.
+cleanup_evt_listener(U=#user{events=Evs0}, EvtListener, Object) ->
+    Filter = fun({Obj,#evh{handler=Evl}}) -> 
+		     not (Object =:= Obj andalso Evl =:= EvtListener) 
+	     end,
+    U#user{events=lists:filter(Filter, Evs0)}.
 
-handle_disconnect(Object, Evh, From, State0 = #state{users=Users0}) ->
+handle_disconnect(Object, Evh = #evh{cb=Fun}, From, 
+		  State0 = #state{users=Users0, cb=Callbacks}) ->
     #user{events=Evs0} = gb_trees:get(From, Users0),
-    Fun = wxEvtHandler:get_callback(Evh),
-    case find_handler(Evs0, Object, Fun) of
-	[] -> {reply, false, State0};
-	Handlers ->
-	    case disconnect(Object,Evh, Handlers) of
-		#event{} ->
-		    {reply, true, State0};
-		Result ->
-		    {reply, Result, State0}
-	    end
-    end.
+    FunId = gb_trees:lookup(Fun, Callbacks),
+    Handlers = find_handler(Evs0, Object, Evh#evh{cb=FunId}),
+    {reply, {try_in_order, Handlers}, State0}.
 
-disconnect(Object,Evh,[Ev=#event{cb_handler=Handler}|Evs]) ->
-    try wxEvtHandler:disconnect_impl(Handler,Object,Evh) of
-	true ->  Ev;
-	false -> disconnect(Object, Evh, Evs);
-	Error -> Error
-    catch _:_ ->
-	    false
+find_handler([{Object,Evh}|Evs], Object, Match) ->
+    case match_handler(Match, Evh) of
+	false -> find_handler(Evs, Object, Match);
+	Res  -> [Res|find_handler(Evs,Object,Match)]
     end;
-disconnect(_, _, []) -> false.
+find_handler([_|Evs], Object, Match) ->
+    find_handler(Evs, Object, Match);
+find_handler([], _, _) -> [].
 
-find_handler(Evs, Object, Fun) ->
-    find_handler(Evs, Object, Fun, []).
+match_handler(M=#evh{et=MET, cb=MCB}, 
+	      #evh{et=ET, cb=CB, handler=Handler}) ->
+    %% Let wxWidgets handle the id matching
+    Match = match_et(MET, ET) 
+	andalso match_cb(MCB, CB),
+    Match andalso M#evh{handler=Handler}.
 
-find_handler([Ev =#event{object=Object,callback=FunReg}|Evs],Object,Search,Acc) ->
-    case FunReg =:= Search of
-	true -> find_handler(Evs,Object,Search,[Ev|Acc]);
-	false when is_function(FunReg), Search =:= 0 ->
-	    find_handler(Evs,Object,Search,[Ev|Acc]);
-	_ ->
-	    find_handler(Evs,Object,Search,Acc)
-    end;
-find_handler([_|Evs],Object,Fun,Res) ->
-    find_handler(Evs,Object,Fun,Res);
-find_handler([],_Object,_Fun,Res) ->
-    Res.
+match_et(null, _) -> true;
+match_et(Met, Et) -> Met =:= Et.
 
+match_cb(none, _) -> true;
+match_cb({value,MId}, Id) ->  MId =:= Id.
 
 %% Cleanup
 %% The server handles callbacks from driver so every other wx call must
 %% be called from another process, therefore the cleaning must be spawned.
 %%
-%% Using Disconnect when we terminate can crash, it is timing releated
-%% but it seems that disconnect on windows that are being deleted are bad.
-%% Since we are terminating the data will be cleaned up anyway.
-cleanup(Env, Data, Disconnect) ->
+cleanup(Env, Data) ->
     put(?WXE_IDENTIFIER, Env),
-    lists:foreach(fun(User) -> cleanup(User, Disconnect) end, Data),
+    Disconnect = fun({Object, Ev}) ->
+			 try wxEvtHandler:disconnect_impl(Object,Ev)
+			 catch _:_ -> ok
+			 end
+		 end,
+
+    lists:foreach(fun(#user{events=Evs}) -> 
+			  [Disconnect(Ev) || Ev <- Evs]
+		  end, Data),
     gen_server:cast(Env#wx_env.sv, {cleaned, self()}),
     normal.
-
-cleanup(#user{events=Evs, evt_handler=Handler}, Disconnect) ->
-    lists:foreach(fun(#event{object=O, callback=CB, cb_handler=CbH}) ->
-			  Disconnect andalso (catch wxEvtHandler:disconnect_impl(CbH,O)),
-			  case is_function(CB) of
-			      true ->
-				  wxEvtHandler:destroy_evt_listener(CbH);
-			      false ->
-				  ignore
-			  end
-		  end, Evs),
-    case Handler of
-	undefined -> ignore;
-	_ ->  wxEvtHandler:destroy_evt_listener(Handler)
-    end,
-    ok.

@@ -1,19 +1,19 @@
-%% -*- coding: utf-8 -*-
 %%
 %% %CopyrightBegin%
 %% 
-%% Copyright Ericsson AB 2010-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2010-2016. All Rights Reserved.
 %% 
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
-%% 
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %% 
 %% %CopyrightEnd%
 %%
@@ -31,7 +31,7 @@
 -define(privdir, "leex_SUITE_priv").
 -define(t, test_server).
 -else.
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 -define(datadir, ?config(data_dir, Config)).
 -define(privdir, ?config(priv_dir, Config)).
 -endif.
@@ -44,8 +44,8 @@
 	 file/1, compile/1, syntax/1,
 	 
 	 pt/1, man/1, ex/1, ex2/1, not_yet/1,
-
-         otp_10302/1, otp_11286/1, unicode/1]).
+	 line_wrap/1,
+	 otp_10302/1, otp_11286/1, unicode/1]).
 
 % Default timetrap timeout (set in init_per_testcase).
 -define(default_timeout, ?t:minutes(1)).
@@ -62,12 +62,13 @@ end_per_testcase(_Case, Config) ->
 suite() -> [{ct_hooks,[ts_install_cth]}].
 
 all() -> 
-    [{group, checks}, {group, examples}].
+    [{group, checks}, {group, examples}, {group, bugs}].
 
 groups() -> 
     [{checks, [], [file, compile, syntax]},
      {examples, [], [pt, man, ex, ex2, not_yet, unicode]},
-     {tickets, [], [otp_10302, otp_11286]}].
+     {tickets, [], [otp_10302, otp_11286]},
+     {bugs, [], [line_wrap]}].
 
 init_per_suite(Config) ->
     Config.
@@ -871,6 +872,48 @@ scan_token_1({more, Cont}, [C | Cs], Fun, Loc, Rs) ->
     scan_token_1(R, Cs, Fun, Loc, Rs).
 
 %% End of ex2
+
+line_wrap(doc) ->    "Much more examples.";
+line_wrap(suite) -> [];
+line_wrap(Config) when is_list(Config) ->
+    Xrl =
+     <<"
+Definitions.
+Rules.
+[a]+[\\n]*= : {token, {first, TokenLine}}.
+[a]+ : {token, {second, TokenLine}}.
+[\\s\\r\\n\\t]+ : skip_token.
+Erlang code.
+      ">>,
+    Dir = ?privdir,
+    XrlFile = filename:join(Dir, "test_line_wrap.xrl"),
+    ?line ok = file:write_file(XrlFile, Xrl),
+    ErlFile = filename:join(Dir, "test_line_wrap.erl"),
+    {ok, _} = leex:file(XrlFile, []),
+    {ok, _} = compile:file(ErlFile, [{outdir,Dir}]),
+    code:purge(test_line_wrap),
+    AbsFile = filename:rootname(ErlFile, ".erl"),
+    code:load_abs(AbsFile, test_line_wrap),
+    fun() ->
+            S = "aaa\naaa",
+            {ok,[{second,1},{second,2}],2} = test_line_wrap:string(S)
+    end(),
+    fun() ->
+            S = "aaa\naaa",
+            {ok,[{second,3},{second,4}],4} = test_line_wrap:string(S, 3)
+    end(),
+    fun() ->
+            {done,{ok,{second,1},1},"\na"} = test_line_wrap:token([], "a\na"),
+            {more,Cont1} = test_line_wrap:token([], "\na"),
+            {done,{ok,{second,2},2},eof} = test_line_wrap:token(Cont1, eof)
+    end(),
+    fun() ->
+            {more,Cont1} = test_line_wrap:tokens([], "a\na"),
+            {done,{ok,[{second,1},{second,2}],2},eof} = test_line_wrap:tokens(Cont1, eof)
+    end(),
+    ok.
+
+%% End of line_wrap
 
 not_yet(doc) ->
     "Not yet implemented.";

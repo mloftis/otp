@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 1999-2012. All Rights Reserved.
+%% Copyright Ericsson AB 1999-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -20,7 +21,7 @@
 -module(h323test).
 
 -export([run/1]).
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 
 run(per)     -> run();
 run(_Rules)  -> ok.
@@ -42,7 +43,7 @@ alerting_val() ->
 	 {'TerminalInfo',asn1_NOVALUE},
 	 false,false},
 	asn1_NOVALUE,
-	{'CallIdentifier',[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+	{'CallIdentifier',<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>},
 	asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}},
       asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE},
      asn1_NOVALUE}.
@@ -57,18 +58,18 @@ connect_val() ->
        {'Connect-UUIE',
 	{0,0,8,2250,0,2},
 	{ipAddress,
-	 {'TransportAddress_ipAddress',[136,225,41,58],1187}},
+	 {'TransportAddress_ipAddress',<<136,225,41,58>>,1187}},
 	{'EndpointType',asn1_NOVALUE,
 	 {'VendorIdentifier',
 	  {'H221NonStandard',181,0,21324},
-	  [77,105,99,114,111,115,111,102,116,174,32,78,101,116,
-	   77,101,100,116,105,110,103,174,0],
-	  [51,46,48,0]},
+	  <<77,105,99,114,111,115,111,102,116,174,32,78,101,116,
+	   77,101,100,116,105,110,103,174,0>>,
+	  <<51,46,48,0>>},
 	 asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,
 	 {'TerminalInfo',asn1_NOVALUE},
 	 false,false},
-	[22,137,237,197,191,35,211,17,140,45,0,192,79,75,28,208],
-	{'CallIdentifier',[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+	<<22,137,237,197,191,35,211,17,140,45,0,192,79,75,28,208>>,
+	{'CallIdentifier',<<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0>>},
 	asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}},
       asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE},
      asn1_NOVALUE}.

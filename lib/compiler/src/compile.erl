@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 1996-2013. All Rights Reserved.
+%% Copyright Ericsson AB 1996-2015. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -25,6 +26,7 @@
 -export([forms/1,forms/2,noenv_forms/2]).
 -export([output_generated/1,noenv_output_generated/1]).
 -export([options/0]).
+-export([env_compiler_options/0]).
 
 %% Erlc interface.
 -export([compile/3,compile_beam/3,compile_asm/3,compile_core/3]).
@@ -39,14 +41,23 @@
 
 %%----------------------------------------------------------------------
 
+-type abstract_code() :: [erl_parse:abstract_form()].
+
+%% Internal representations used for 'from_asm' and 'from_beam' compilation can
+%% also be valid, but have no relevant types defined.
+-type forms() :: abstract_code() | cerl:c_module().
+
 -type option() :: atom() | {atom(), term()} | {'d', atom(), term()}.
 
--type err_info() :: {erl_scan:line() | 'none',
+-type err_info() :: {erl_anno:line() | 'none',
 		     module(), term()}. %% ErrorDescriptor
 -type errors()   :: [{file:filename(), [err_info()]}].
 -type warnings() :: [{file:filename(), [err_info()]}].
 -type mod_ret()  :: {'ok', module()}
                   | {'ok', module(), cerl:c_module()} %% with option 'to_core'
+                  | {'ok',                            %% with option 'to_pp'
+                     module() | [],                   %% module() if 'to_exp'
+                     abstract_code()}
                   | {'ok', module(), warnings()}.
 -type bin_ret()  :: {'ok', module(), binary()}
                   | {'ok', module(), binary(), warnings()}.
@@ -77,7 +88,11 @@ file(File, Opts) when is_list(Opts) ->
 file(File, Opt) ->
     file(File, [Opt|?DEFAULT_OPTIONS]).
 
-forms(File) -> forms(File, ?DEFAULT_OPTIONS).
+-spec forms(abstract_code()) -> comp_ret().
+
+forms(Forms) -> forms(Forms, ?DEFAULT_OPTIONS).
+
+-spec forms(forms(), [option()] | option()) -> comp_ret().
 
 forms(Forms, Opts) when is_list(Opts) ->
     do_compile({forms,Forms}, [binary|Opts++env_default_opts()]);
@@ -105,6 +120,8 @@ noenv_file(File, Opts) when is_list(Opts) ->
 noenv_file(File, Opt) ->
     noenv_file(File, [Opt|?DEFAULT_OPTIONS]).
 
+-spec noenv_forms(forms(), [option()] | option()) -> comp_ret().
+
 noenv_forms(Forms, Opts) when is_list(Opts) ->
     do_compile({forms,Forms}, [binary|Opts]);
 noenv_forms(Forms, Opt) when is_atom(Opt) ->
@@ -117,6 +134,14 @@ noenv_output_generated(Opts) ->
     any(fun ({save_binary,_T,_F}) -> true;
 	    (_Other) -> false
 	end, Passes).
+
+%%
+%% Retrieve ERL_COMPILER_OPTIONS as a list of terms
+%%
+
+-spec env_compiler_options() -> [term()].
+
+env_compiler_options() -> env_default_opts().
 
 %%
 %%  Local functions
@@ -132,7 +157,8 @@ env_default_opts() ->
 	Str when is_list(Str) ->
 	    case erl_scan:string(Str) of
 		{ok,Tokens,_} ->
-		    case erl_parse:parse_term(Tokens ++ [{dot, 1}]) of
+                    Dot = {dot, erl_anno:new(1)},
+		    case erl_parse:parse_term(Tokens ++ [Dot]) of
 			{ok,List} when is_list(List) -> List;
 			{ok,Term} -> [Term];
 			{error,_Reason} ->
@@ -214,6 +240,8 @@ format_error({epp,E}) ->
     epp:format_error(E);
 format_error(write_error) ->
     "error writing file";
+format_error({write_error, Error}) ->
+    io_lib:format("error writing file: ~ts", [file:format_error(Error)]);
 format_error({rename,From,To,Error}) ->
     io_lib:format("failed to rename ~ts to ~ts: ~ts",
 		  [From,To,file:format_error(Error)]);
@@ -230,12 +258,27 @@ format_error({undef_parse_transform,M}) ->
 format_error({core_transform,M,R}) ->
     io_lib:format("error in core transform '~s': ~tp", [M, R]);
 format_error({crash,Pass,Reason}) ->
-    io_lib:format("internal error in ~p;\ncrash reason: ~tp", [Pass,Reason]);
+    io_lib:format("internal error in ~p;\ncrash reason: ~ts", [Pass,format_error_reason(Reason)]);
 format_error({bad_return,Pass,Reason}) ->
-    io_lib:format("internal error in ~p;\nbad return value: ~tp", [Pass,Reason]);
+    io_lib:format("internal error in ~p;\nbad return value: ~ts", [Pass,format_error_reason(Reason)]);
 format_error({module_name,Mod,Filename}) ->
-    io_lib:format("Module name '~s' does not match file name '~ts'",
-		  [Mod,Filename]).
+    io_lib:format("Module name '~s' does not match file name '~ts'", [Mod,Filename]);
+format_error(reparsing_invalid_unicode) ->
+    "Non-UTF-8 character(s) detected, but no encoding declared. Encode the file in UTF-8 or add \"%% coding: latin-1\" at the beginning of the file. Retrying with latin-1 encoding.".
+
+format_error_reason({Reason, Stack}) when is_list(Stack) ->
+    StackFun = fun
+	(escript, run,      2) -> true;
+	(escript, start,    1) -> true;
+	(init,    start_it, 1) -> true;
+	(init,    start_em, 1) -> true;
+	(_Mod, _Fun, _Arity)   -> false
+    end,
+    FormatFun = fun (Term, _) -> io_lib:format("~tp", [Term]) end,
+    [io_lib:format("~tp", [Reason]),"\n\n",
+     lib:format_stacktrace(1, Stack, StackFun, FormatFun)];
+format_error_reason(Reason) ->
+    io_lib:format("~tp", [Reason]).
 
 %% The compile state record.
 -record(compile, {filename="" :: file:filename(),
@@ -270,11 +313,20 @@ internal_comp(Passes, File, Suffix, St0) ->
     St1 = St0#compile{filename=File, dir=Dir, base=Base,
 		      ifile=erlfile(Dir, Base, Suffix),
 		      ofile=objfile(Base, St0)},
-    Run = case member(time, St1#compile.options) of
-	      true  ->
-		  io:format("Compiling ~tp\n", [File]),
-		  fun run_tc/2;
-	      false -> fun({_Name,Fun}, St) -> catch Fun(St) end
+    Opts = St1#compile.options,
+    Run0 = case member(time, Opts) of
+	       true  ->
+		   io:format("Compiling ~tp\n", [File]),
+		   fun run_tc/2;
+	       false -> fun({_Name,Fun}, St) -> catch Fun(St) end
+	   end,
+    Run = case keyfind(eprof, 1, Opts) of
+	      {eprof,EprofPass} ->
+		  fun(P, St) ->
+			  run_eprof(P, EprofPass, St)
+		  end;
+	      false ->
+		  Run0
 	  end,
     case fold_comp(Passes, Run, St1) of
 	{ok,St2} -> comp_ret_ok(St2);
@@ -305,16 +357,25 @@ fold_comp([{Name,Pass}|Ps], Run, St0) ->
 fold_comp([], _Run, St) -> {ok,St}.
 
 run_tc({Name,Fun}, St) ->
-    Before0 = statistics(runtime),
+    T1 = erlang:monotonic_time(),
     Val = (catch Fun(St)),
-    After0 = statistics(runtime),
-    {Before_c, _} = Before0,
-    {After_c, _} = After0,
+    T2 = erlang:monotonic_time(),
+    Elapsed = erlang:convert_time_unit(T2 - T1, native, milli_seconds),
     Mem0 = erts_debug:flat_size(Val)*erlang:system_info(wordsize),
     Mem = lists:flatten(io_lib:format("~.1f kB", [Mem0/1024])),
-    io:format(" ~-30s: ~10.2f s ~12s\n",
-	      [Name,(After_c-Before_c) / 1000,Mem]),
+    io:format(" ~-30s: ~10.3f s ~12s\n",
+	      [Name,Elapsed/1000,Mem]),
     Val.
+
+run_eprof({Name,Fun}, Name, St) ->
+    io:format("~p: Running eprof\n", [Name]),
+    c:appcall(tools, eprof, start_profiling, [[self()]]),
+    Val = (catch Fun(St)),
+    c:appcall(tools, eprof, stop_profiling, []),
+    c:appcall(tools, eprof, analyze, []),
+    Val;
+run_eprof({_,Fun}, _, St) ->
+    catch Fun(St).
 
 comp_ret_ok(#compile{code=Code,warnings=Warn0,module=Mod,options=Opts}=St) ->
     case werror(St) of
@@ -416,8 +477,6 @@ pass(from_core) ->
     {".core",[?pass(parse_core)|core_passes()]};
 pass(from_asm) ->
     {".S",[?pass(beam_consult_asm)|asm_passes()]};
-pass(asm) ->
-    pass(from_asm);
 pass(from_beam) ->
     {".beam",[?pass(read_beam_file)|binary_passes()]};
 pass(_) -> none.
@@ -593,7 +652,7 @@ standard_passes() ->
      {iff,'to_exp',{done,"E"}},
 
      %% Conversion to Core Erlang.
-     ?pass(core_module),
+     {pass,v3_core},
      {iff,'dcore',{listing,"core"}},
      {iff,'to_core0',{done,"core"}}
      | core_passes()].
@@ -605,10 +664,12 @@ core_passes() ->
       [{unless,no_copt,
        [{core_old_inliner,fun test_old_inliner/1,fun core_old_inliner/1},
 	{iff,doldinline,{listing,"oldinline"}},
-	?pass(core_fold_module),
+	{pass,sys_core_fold},
+	{iff,dcorefold,{listing,"corefold"}},
 	{core_inline_module,fun test_core_inliner/1,fun core_inline_module/1},
 	{iff,dinline,{listing,"inline"}},
-	{core_fold_after_inline,fun test_core_inliner/1,fun core_fold_module/1},
+        {core_fold_after_inlining,fun test_any_inliner/1,
+         fun core_fold_module_after_inlining/1},
 	?pass(core_transforms)]},
        {iff,dcopt,{listing,"copt"}},
        {iff,'to_core',{done,"core"}}]}
@@ -616,14 +677,14 @@ core_passes() ->
 
 kernel_passes() ->
     %% Destructive setelement/3 optimization and core lint.
-    [?pass(core_dsetel_module),
+    [{pass,sys_core_dsetel},
      {iff,dsetel,{listing,"dsetel"}},
 
      {iff,clint,?pass(core_lint_module)},
      {iff,core,?pass(save_core_code)},
 
      %% Kernel Erlang and code generation.
-     ?pass(kernel_module),
+     {pass,v3_kernel},
      {iff,dkern,{listing,"kernel"}},
      {iff,'to_kernel',{done,"kernel"}},
      {pass,v3_life},
@@ -636,11 +697,16 @@ asm_passes() ->
     %% Assembly level optimisations.
     [{delay,
       [{pass,beam_a},
+       {iff,da,{listing,"a"}},
        {unless,no_postopt,
-	[{pass,beam_block},
+	[{unless,no_reorder,{pass,beam_reorder}},
+	 {iff,dre,{listing,"reorder"}},
+	 {pass,beam_block},
 	 {iff,dblk,{listing,"block"}},
 	 {unless,no_except,{pass,beam_except}},
 	 {iff,dexcept,{listing,"except"}},
+	 {unless,no_bs_opt,{pass,beam_bs}},
+	 {iff,dbs,{listing,"bs"}},
 	 {unless,no_bopt,{pass,beam_bool}},
 	 {iff,dbool,{listing,"bool"}},
 	 {unless,no_topt,{pass,beam_type}},
@@ -668,6 +734,7 @@ asm_passes() ->
        {iff,no_postopt,[{pass,beam_clean}]},
 
        {pass,beam_z},
+       {iff,dz,{listing,"z"}},
        {iff,dopt,{listing,"optimize"}},
        {iff,'S',{listing,"S"}},
        {iff,'to_asm',{done,"S"}}]},
@@ -774,19 +841,58 @@ no_native_compilation(BeamFile, #compile{options=Opts0}) ->
 	_ -> false
     end.
 
-parse_module(St) ->
-    Opts = St#compile.options,
-    Cwd = ".",
-    IncludePath = [Cwd, St#compile.dir|inc_paths(Opts)],
-    R =  epp:parse_file(St#compile.ifile, IncludePath, pre_defs(Opts)),
+parse_module(St0) ->
+    case do_parse_module(utf8, St0) of
+	{ok,_}=Ret ->
+	    Ret;
+	{error,_}=Ret ->
+	    Ret;
+	{invalid_unicode,File,Line} ->
+	    case do_parse_module(latin1, St0) of
+		{ok,St} ->
+		    Es = [{File,[{Line,?MODULE,reparsing_invalid_unicode}]}],
+		    {ok,St#compile{warnings=Es++St#compile.warnings}};
+		{error,St} ->
+		    Es = [{File,[{Line,?MODULE,reparsing_invalid_unicode}]}],
+		    {error,St#compile{errors=Es++St#compile.errors}}
+	    end
+    end.
+
+do_parse_module(DefEncoding, #compile{ifile=File,options=Opts,dir=Dir}=St) ->
+    R = epp:parse_file(File,
+		       [{includes,[".",Dir|inc_paths(Opts)]},
+			{macros,pre_defs(Opts)},
+			{default_encoding,DefEncoding},
+			extra]),
     case R of
-	{ok,Forms} ->
-            Encoding = epp:read_encoding(St#compile.ifile),
-	    {ok,St#compile{code=Forms,encoding=Encoding}};
+	{ok,Forms,Extra} ->
+	    Encoding = proplists:get_value(encoding, Extra),
+	    case find_invalid_unicode(Forms, File) of
+		none ->
+		    {ok,St#compile{code=Forms,encoding=Encoding}};
+		{invalid_unicode,_,_}=Ret ->
+		    case Encoding of
+			none ->
+			    Ret;
+			_ ->
+			    {ok,St#compile{code=Forms,encoding=Encoding}}
+		    end
+	    end;
 	{error,E} ->
 	    Es = [{St#compile.ifile,[{none,?MODULE,{epp,E}}]}],
 	    {error,St#compile{errors=St#compile.errors ++ Es}}
     end.
+
+find_invalid_unicode([H|T], File0) ->
+    case H of
+	{attribute,_,file,{File,_}} ->
+	    find_invalid_unicode(T, File);
+	{error,{Line,file_io_server,invalid_unicode}} ->
+	    {invalid_unicode,File0,Line};
+	_Other ->
+	    find_invalid_unicode(T, File0)
+    end;
+find_invalid_unicode([], _) -> none.
 
 parse_core(St) ->
     case file:read_file(St#compile.ifile) of
@@ -847,28 +953,35 @@ transform_module(#compile{options=Opt,code=Code0}=St0) ->
 
 foldl_transform(St, [T|Ts]) ->
     Name = "transform " ++ atom_to_list(T),
-    Fun = fun(S) -> T:parse_transform(S#compile.code, S#compile.options) end,
-    Run = case member(time, St#compile.options) of
-	      true  -> fun run_tc/2;
-	      false -> fun({_Name,F}, S) -> catch F(S) end
-	  end,
-    case Run({Name, Fun}, St) of
-	{error,Es,Ws} ->
-	    {error,St#compile{warnings=St#compile.warnings ++ Ws,
-			      errors=St#compile.errors ++ Es}};
-	{'EXIT',{undef,_}} ->
-	    Es = [{St#compile.ifile,[{none,compile,
-				      {undef_parse_transform,T}}]}],
-	    {error,St#compile{errors=St#compile.errors ++ Es}};
-	{'EXIT',R} ->
-	    Es = [{St#compile.ifile,[{none,compile,{parse_transform,T,R}}]}],
-	    {error,St#compile{errors=St#compile.errors ++ Es}};
-	{warning, Forms, Ws} ->
-	    foldl_transform(
-	      St#compile{code=Forms,
-			 warnings=St#compile.warnings ++ Ws}, Ts);
-	Forms ->
-	    foldl_transform(St#compile{code=Forms}, Ts)
+    case code:ensure_loaded(T) =:= {module,T} andalso
+                erlang:function_exported(T, parse_transform, 2) of
+        true ->
+            Fun = fun(S) ->
+                         T:parse_transform(S#compile.code, S#compile.options)
+                  end,
+            Run = case member(time, St#compile.options) of
+                      true  -> fun run_tc/2;
+                      false -> fun({_Name,F}, S) -> catch F(S) end
+                  end,
+            case Run({Name, Fun}, St) of
+                {error,Es,Ws} ->
+                    {error,St#compile{warnings=St#compile.warnings ++ Ws,
+                                      errors=St#compile.errors ++ Es}};
+                {'EXIT',R} ->
+                    Es = [{St#compile.ifile,[{none,compile,
+                                              {parse_transform,T,R}}]}],
+                    {error,St#compile{errors=St#compile.errors ++ Es}};
+                {warning, Forms, Ws} ->
+                    foldl_transform(
+                      St#compile{code=Forms,
+                                 warnings=St#compile.warnings ++ Ws}, Ts);
+                Forms ->
+                    foldl_transform(St#compile{code=Forms}, Ts)
+            end;
+        false ->
+            Es = [{St#compile.ifile,[{none,compile,
+                                      {undef_parse_transform,T}}]}],
+            {error,St#compile{errors=St#compile.errors ++ Es}}
     end;
 foldl_transform(St, []) -> {ok,St}.
 
@@ -1099,7 +1212,7 @@ makedep_output(#compile{code=Code,options=Opts,ofile=Ofile}=St) ->
 		end,
 		{ok,St}
 	    catch
-		exit:_ ->
+		error:_ ->
 		    %% Couldn't write to output Makefile.
 		    Err = {St#compile.ifile,[{none,?MODULE,write_error}]},
 		    {error,St#compile{errors=St#compile.errors++[Err]}}
@@ -1122,13 +1235,11 @@ expand_module(#compile{code=Code,options=Opts0}=St0) ->
     Opts = expand_opts(Opts1),
     {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}}.
 
-core_module(#compile{code=Code0,options=Opts}=St) ->
-    {ok,Code,Ws} = v3_core:module(Code0, Opts),
-    {ok,St#compile{code=Code,warnings=St#compile.warnings ++ Ws}}.
-
-core_fold_module(#compile{code=Code0,options=Opts,warnings=Warns}=St) ->
-    {ok,Code,Ws} = sys_core_fold:module(Code0, Opts),
-    {ok,St#compile{code=Code,warnings=Warns ++ Ws}}.
+core_fold_module_after_inlining(#compile{code=Code0,options=Opts}=St) ->
+    %% Inlining may produce code that generates spurious warnings.
+    %% Ignore all warnings.
+    {ok,Code,_Ws} = sys_core_fold:module(Code0, Opts),
+    {ok,St#compile{code=Code}}.
 
 test_old_inliner(#compile{options=Opts}) ->
     %% The point of this test is to avoid loading the old inliner
@@ -1148,6 +1259,9 @@ test_core_inliner(#compile{options=Opts}) ->
 		end, Opts)
     end.
 
+test_any_inliner(St) ->
+    test_old_inliner(St) orelse test_core_inliner(St).
+
 core_old_inliner(#compile{code=Code0,options=Opts}=St) ->
     {ok,Code} = sys_core_inline:module(Code0, Opts),
     {ok,St#compile{code=Code}}.
@@ -1155,14 +1269,6 @@ core_old_inliner(#compile{code=Code0,options=Opts}=St) ->
 core_inline_module(#compile{code=Code0,options=Opts}=St) ->
     Code = cerl_inline:core_transform(Code0, Opts),
     {ok,St#compile{code=Code}}.
-
-core_dsetel_module(#compile{code=Code0,options=Opts}=St) ->
-    {ok,Code} = sys_core_dsetel:module(Code0, Opts),
-    {ok,St#compile{code=Code}}.
-
-kernel_module(#compile{code=Code0,options=Opts}=St) ->
-    {ok,Code,Ws} = v3_kernel:module(Code0, Opts),
-    {ok,St#compile{code=Code,warnings=St#compile.warnings ++ Ws}}.
 
 save_abstract_code(#compile{ifile=File}=St) ->
     case abstract_code(St) of
@@ -1172,7 +1278,8 @@ save_abstract_code(#compile{ifile=File}=St) ->
 	    {error,St#compile{errors=St#compile.errors ++ [{File,Es}]}}
     end.
 
-abstract_code(#compile{code=Code,options=Opts,ofile=OFile}) ->
+abstract_code(#compile{code=Code0,options=Opts,ofile=OFile}) ->
+    Code = erl_parse:anno_to_term(Code0),
     Abstr = erlang:term_to_binary({raw_abstract_v1,Code}, [compressed]),
     case member(encrypt_debug_info, Opts) of
 	true ->
@@ -1225,32 +1332,34 @@ generate_key(String) when is_list(String) ->
 encrypt({des3_cbc=Type,Key,IVec,BlockSize}, Bin0) ->
     Bin1 = case byte_size(Bin0) rem BlockSize of
 	       0 -> Bin0;
-	       N -> list_to_binary([Bin0,random_bytes(BlockSize-N)])
+	       N -> list_to_binary([Bin0,crypto:strong_rand_bytes(BlockSize-N)])
 	   end,
     Bin = crypto:block_encrypt(Type, Key, IVec, Bin1),
     TypeString = atom_to_list(Type),
     list_to_binary([0,length(TypeString),TypeString,Bin]).
-
-random_bytes(N) ->
-    {A,B,C} = now(),
-    _ = random:seed(A, B, C),
-    random_bytes_1(N, []).
-
-random_bytes_1(0, Acc) -> Acc;
-random_bytes_1(N, Acc) -> random_bytes_1(N-1, [random:uniform(255)|Acc]).
 
 save_core_code(St) ->
     {ok,St#compile{core_code=cerl:from_records(St#compile.code)}}.
 
 beam_asm(#compile{ifile=File,code=Code0,
 		  abstract_code=Abst,mod_options=Opts0}=St) ->
-    Source = filename:absname(File),
+    Source = paranoid_absname(File),
     Opts1 = lists:map(fun({debug_info_key,_}) -> {debug_info_key,'********'};
 			 (Other) -> Other
 		      end, Opts0),
     Opts2 = [O || O <- Opts1, effects_code_generation(O)],
     case beam_asm:module(Code0, Abst, Source, Opts2) of
 	{ok,Code} -> {ok,St#compile{code=Code,abstract_code=[]}}
+    end.
+
+paranoid_absname(""=File) ->
+    File;
+paranoid_absname(File) ->
+    case file:get_cwd() of
+	{ok,Cwd} ->
+	    filename:absname(File, Cwd);
+	_ ->
+	    File
     end.
 
 test_native(#compile{options=Opts}) ->
@@ -1376,8 +1485,8 @@ save_binary_1(St) ->
 			 end,
 		    {error,St#compile{errors=St#compile.errors ++ Es}}
 	    end;
-	{error,_Error} ->
-	    Es = [{Tfile,[{none,compile,write_error}]}],
+	{error,Error} ->
+	    Es = [{Tfile,[{none,compile,{write_error,Error}}]}],
 	    {error,St#compile{errors=St#compile.errors ++ Es}}
     end.
 
@@ -1525,8 +1634,8 @@ listing(LFun, Ext, St) ->
 	    LFun(Lf, Code),
 	    ok = file:close(Lf),
 	    {ok,St};
-	{error,_Error} ->
-	    Es = [{Lfile,[{none,compile,write_error}]}],
+	{error,Error} ->
+	    Es = [{Lfile,[{none,compile,{write_error,Error}}]}],
 	    {error,St#compile{errors=St#compile.errors ++ Es}}
     end.
 
@@ -1536,11 +1645,8 @@ output_encoding(F, #compile{encoding = Encoding}) ->
     ok = io:setopts(F, [{encoding, Encoding}]),
     ok = io:fwrite(F, <<"%% ~s\n">>, [epp:encoding_to_string(Encoding)]).
 
-restore_expanded_types("P", Fs) ->
-    epp:restore_typed_record_fields(Fs);
 restore_expanded_types("E", {M,I,Fs0}) ->
-    Fs1 = restore_expand_module(Fs0),
-    Fs = epp:restore_typed_record_fields(Fs1),
+    Fs = restore_expand_module(Fs0),
     {M,I,Fs};
 restore_expanded_types(_Ext, Code) -> Code.
 
@@ -1552,6 +1658,8 @@ restore_expand_module([{attribute,Line,spec,[Arg]}|Fs]) ->
     [{attribute,Line,spec,Arg}|restore_expand_module(Fs)];
 restore_expand_module([{attribute,Line,callback,[Arg]}|Fs]) ->
     [{attribute,Line,callback,Arg}|restore_expand_module(Fs)];
+restore_expand_module([{attribute,Line,record,[R]}|Fs]) ->
+    [{attribute,Line,record,R}|restore_expand_module(Fs)];
 restore_expand_module([F|Fs]) ->
     [F|restore_expand_module(Fs)];
 restore_expand_module([]) -> [].
@@ -1598,6 +1706,7 @@ help(_) ->
 %%   Compile entry point for erl_compile.
 
 compile(File0, _OutFile, Options) ->
+    pre_load(),
     File = shorten_filename(File0),
     case file(File, make_erl_options(Options)) of
 	{ok,_Mod} -> ok;
@@ -1613,7 +1722,7 @@ compile_beam(File0, _OutFile, Opts) ->
 
 compile_asm(File0, _OutFile, Opts) ->
     File = shorten_filename(File0),
-    case file(File, [asm|make_erl_options(Opts)]) of
+    case file(File, [from_asm|make_erl_options(Opts)]) of
 	{ok,_Mod} -> ok;
 	Other -> Other
     end.
@@ -1662,3 +1771,47 @@ make_erl_options(Opts) ->
 	end,
     Options ++ [report_errors, {cwd, Cwd}, {outdir, Outdir}|
 	        [{i, Dir} || Dir <- Includes]] ++ Specific.
+
+pre_load() ->
+    L = [beam_a,
+	 beam_asm,
+	 beam_block,
+	 beam_bool,
+	 beam_bs,
+	 beam_bsm,
+	 beam_clean,
+	 beam_dead,
+	 beam_dict,
+	 beam_except,
+	 beam_flatten,
+	 beam_jump,
+	 beam_opcodes,
+	 beam_peep,
+	 beam_receive,
+	 beam_reorder,
+	 beam_split,
+	 beam_trim,
+	 beam_type,
+	 beam_utils,
+	 beam_validator,
+	 beam_z,
+	 cerl,
+	 cerl_clauses,
+	 cerl_sets,
+	 cerl_trees,
+	 core_lib,
+	 epp,
+	 erl_bifs,
+	 erl_expand_records,
+	 erl_lint,
+	 erl_parse,
+	 erl_scan,
+	 sys_core_dsetel,
+	 sys_core_fold,
+	 sys_pre_expand,
+	 v3_codegen,
+	 v3_core,
+	 v3_kernel,
+	 v3_life],
+    _ = code:ensure_modules_loaded(L),
+    ok.

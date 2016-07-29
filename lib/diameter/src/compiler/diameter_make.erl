@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2010-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2010-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -33,7 +34,8 @@
 -export([codec/2,
          codec/1,
          format/1,
-         flatten/1]).
+         flatten/1,
+         format_error/1]).
 
 -export_type([opt/0]).
 
@@ -81,8 +83,8 @@ codec(File, Opts) ->
     case parse(Dict, Opts) of
         {ok, ParseD} ->
             make(Path, default(Opts), ParseD);
-        {error = E, Reason} ->
-            {E, diameter_dict_util:format_error(Reason)}
+        {error, _} = E ->
+            E
     end.
 
 codec(File) ->
@@ -114,6 +116,11 @@ flatten([?VERSION = V | Dict]) ->
                       [avp_types, import_avps],
                       [grouped, import_groups],
                       [enum, import_enums]])].
+
+%% format_error/1
+
+format_error(T) ->
+    diameter_dict_util:format_error(T).
 
 %% ===========================================================================
 
@@ -226,21 +233,29 @@ identify([Vsn | [T|_] = ParseD])
 identify({path, File} = T) ->
     {T, File};
 identify(File) ->
-    Bin = iolist_to_binary([File]),
-    case is_path(Bin) of
+    case is_path([File]) of
         true  -> {{path, File}, File};
-        false -> {Bin, ?DEFAULT_DICT_FILE}
+        false -> {File, ?DEFAULT_DICT_FILE}
     end.
 
-%% Interpret anything containing \n or \r as a literal dictionary,
-%% otherwise a path. (Which might be the wrong guess in the worst case.)
-is_path(Bin) ->
-    try
-        [throw(C) || <<C>> <= Bin, $\n == C orelse $\r == C],
-        true
-    catch
-        throw:_ -> false
-    end.
+%% Interpret anything containing \n or \r as a literal dictionary.
+
+is_path([<<C,B/binary>> | T]) ->
+    is_path([C, B | T]);
+
+is_path([[C|L] | T]) ->
+    is_path([C, L | T]);
+
+is_path([C|_])
+  when $\n == C;
+       $\r == C ->
+    false;
+
+is_path([_|T]) ->
+    is_path(T);
+
+is_path([]) ->
+    true.
 
 make(File, Opts, Dict) ->
     ok(lists:foldl(fun(M,A) -> [make(File, Opts, Dict, M) | A] end,

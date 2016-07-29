@@ -14,7 +14,7 @@
 %% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
 %% USA
 %%
-%% @copyright 1999-2006 Richard Carlsson
+%% @copyright 1999-2014 Richard Carlsson
 %% @author Richard Carlsson <carlsson.richard@gmail.com>
 %% @end
 %% =====================================================================
@@ -36,6 +36,11 @@
 %% been reasonably well tested, but the possibility of errors remains.
 %% Keep backups of your original code safely stored, until you feel
 %% confident that the new, modified code can be trusted.
+%%
+%% @type syntaxTree() = erl_syntax:syntaxTree(). An abstract syntax
+%% tree. See the {@link erl_syntax} module for details.
+%%
+%% @type filename() = file:filename().
 
 -module(erl_tidy).
 
@@ -79,7 +84,6 @@ dir(Dir) ->
 
 %% =====================================================================
 %% @spec dir(Directory::filename(), Options::[term()]) -> ok
-%%           filename() = file:filename()
 %%
 %% @doc Tidies Erlang source files in a directory and its
 %% subdirectories.
@@ -269,6 +273,13 @@ file(Name) ->
 %%       is typically most useful if the `verbose' flag is enabled, to
 %%       generate reports about the program files without affecting
 %%       them. The default value is `false'.</dd>
+%%
+%%   <dt>{stdout, boolean()}</dt>
+%%
+%%      <dd>If the value is `true', instead of the file being written
+%%      to disk it will be printed to stdout. The default value is
+%%      `false'.</dd>
+%%
 %% </dl>
 %%
 %% See the function `module/2' for further options.
@@ -309,9 +320,15 @@ file_2(Name, Opts) ->
         true ->
             ok;
         false ->
-            write_module(Tree, Name, Opts1),
-            ok
-    end.
+			case proplists:get_bool(stdout, Opts1) of
+				true ->
+					print_module(Tree, Opts1),
+					ok;
+				false ->
+					write_module(Tree, Name, Opts1),
+					ok
+			end
+	end.
 
 read_module(Name, Opts) ->
     verbose("reading module `~ts'.", [filename(Name)], Opts),
@@ -398,6 +415,10 @@ write_module(Tree, Name, Opts) ->
             error_write_file(File),
             throw(R)
     end.
+
+print_module(Tree, Opts) ->
+	Printer = proplists:get_value(printer, Opts),
+	io:put_chars(Printer(Tree, Opts)).
 
 output(FD, Printer, Tree, Opts) ->
     io:put_chars(FD, Printer(Tree, Opts)),
@@ -496,7 +517,6 @@ module(Forms) ->
 %% @spec module(Forms, Options::[term()]) -> syntaxTree()
 %%
 %%          Forms = syntaxTree() | [syntaxTree()]
-%%          syntaxTree() = erl_syntax:syntaxTree()
 %%
 %% @doc Tidies a syntax tree representation of a module
 %% definition. The given `Forms' may be either a single
@@ -775,16 +795,11 @@ keep_form(Form, Used, Opts) ->
             N = erl_syntax_lib:analyze_function(Form),
             case sets:is_element(N, Used) of
                 false ->
-                    report_removed_def("function", N, Form, Opts),
-                    false;
-                true ->
-                    true
-            end;
-        rule ->
-            N = erl_syntax_lib:analyze_rule(Form),
-            case sets:is_element(N, Used) of
-                false ->
-                    report_removed_def("rule", N, Form, Opts),
+                    {F, A} = N,
+                    File = proplists:get_value(file, Opts, ""),
+                    report({File, erl_syntax:get_pos(Form),
+                            "removing unused function `~w/~w'."},
+                           [F, A], Opts),
                     false;
                 true ->
                     true
@@ -806,22 +821,12 @@ keep_form(Form, Used, Opts) ->
             true
     end.
 
-report_removed_def(Type, {N, A}, Form, Opts) ->
-    File = proplists:get_value(file, Opts, ""),
-    report({File, erl_syntax:get_pos(Form),
-	    "removing unused ~s `~w/~w'."},
-	   [Type, N, A], Opts).
-
 collect_functions(Forms) ->
     lists:foldl(
       fun (F, {Names, Defs}) ->
               case erl_syntax:type(F) of
                   function ->
                       N = erl_syntax_lib:analyze_function(F),
-                      {sets:add_element(N, Names),
-                       dict:store(N, {F, []}, Defs)};
-                  rule ->
-                      N = erl_syntax_lib:analyze_rule(F),
                       {sets:add_element(N, Names),
                        dict:store(N, {F, []}, Defs)};
                   _ ->
@@ -835,11 +840,6 @@ update_forms([F | Fs], Defs, Imports, Opts) ->
     case erl_syntax:type(F) of
         function ->
             N = erl_syntax_lib:analyze_function(F),
-            {F1, Fs1} = dict:fetch(N, Defs),
-            [F1 | lists:reverse(Fs1)] ++ update_forms(Fs, Defs, Imports,
-                                                      Opts);
-        rule ->
-            N = erl_syntax_lib:analyze_rule(F),
             {F1, Fs1} = dict:fetch(N, Defs),
             [F1 | lists:reverse(Fs1)] ++ update_forms(Fs, Defs, Imports,
                                                       Opts);
@@ -940,8 +940,8 @@ hidden_uses_2(Tree, Used) ->
 
 -record(env, {file		       :: file:filename(),
               module                   :: atom(),
-              current                  :: fa(),
-              imports = dict:new()     :: dict(),
+              current                  :: fa() | 'undefined',
+              imports = dict:new()     :: dict:dict(atom(), atom()),
               context = normal	       :: context(),
               verbosity = 1	       :: 0 | 1 | 2,
               quiet = false            :: boolean(),
@@ -952,13 +952,13 @@ hidden_uses_2(Tree, Used) ->
               new_guard_tests = true   :: boolean(),
 	      old_guard_tests = false  :: boolean()}).
 
--record(st, {varc              :: non_neg_integer(),
-	     used = sets:new() :: set(),
-	     imported          :: set(),
-	     vars              :: set(),
-	     functions         :: set(),
+-record(st, {varc              :: non_neg_integer() | 'undefined',
+	     used = sets:new() :: sets:set({atom(), arity()}),
+	     imported          :: sets:set({atom(), arity()}),
+	     vars              :: sets:set(atom()) | 'undefined',
+	     functions         :: sets:set({atom(), arity()}),
 	     new_forms = []    :: [erl_syntax:syntaxTree()],
-	     rename            :: dict()}).
+	     rename            :: dict:dict(mfa(), {atom(), atom()})}).
 
 visit_used(Names, Defs, Roots, Imports, Module, Opts) ->
     File = proplists:get_value(file, Opts, ""),
@@ -1067,13 +1067,13 @@ visit_clause(Tree, Env, St0) ->
 
 visit_infix_expr(Tree, #env{context = guard_test}, St0) ->
     %% Detect transition from guard test to guard expression.
-    visit_other(Tree, #env{context = guard_expr}, St0);
+    visit_other(Tree, #env{context = guard_expr, file = ""}, St0);
 visit_infix_expr(Tree, Env, St0) ->
     visit_other(Tree, Env, St0).
 
 visit_prefix_expr(Tree, #env{context = guard_test}, St0) ->
     %% Detect transition from guard test to guard expression.
-    visit_other(Tree, #env{context = guard_expr}, St0);
+    visit_other(Tree, #env{context = guard_expr, file = ""}, St0);
 visit_prefix_expr(Tree, Env, St0) ->
     visit_other(Tree, Env, St0).
 

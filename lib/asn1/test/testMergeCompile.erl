@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2001-2012. All Rights Reserved.
+%% Copyright Ericsson AB 2001-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -22,7 +23,7 @@
 
 -export([main/1,mvrasn/1]).
 
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 
 -record('InitiatingMessage',{procedureCode,criticality,value}).
 -record('Iu-ReleaseCommand',{protocolIEs,protocolExtensions}).
@@ -30,12 +31,12 @@
 main(Erule) ->
     %% test of module MS.set.asn that tests OTP-4492: different tagdefault in 
     %% modules and types  with same name in modules
-    MSVal = {'Type4M2',8,true,three,"OCTET STRING"},
+    MSVal = {'Type4M2',8,true,three,<<"OCTET STRING">>},
     asn1_test_lib:roundtrip('MS', 'Type4M2', MSVal),
 
     %% test of RANAP.set.asn1
     PIEVal2 = [{'ProtocolIE-Field',4,ignore,{radioNetwork,'rab-pre-empted'}}],
-    EncVal =
+    EncVal0 =
 	case Erule of
 	    per -> 
 		<<1,100>>;
@@ -44,6 +45,7 @@ main(Erule) ->
 	    ber ->
 		<<2,1,1>>
 	end,
+    EncVal = {asn1_OPENTYPE,EncVal0},
     PEVal2 = [{'ProtocolExtensionField',1,ignore,EncVal},
 	      {'ProtocolExtensionField',2,reject,EncVal}],
     Val2 =
@@ -64,16 +66,16 @@ main(Erule) ->
 mvrasn(Erule) ->
     case Erule of
 	ber ->
-	    ?line ok = test(isd),
-	    ?line ok = test(isd2),
-	    ?line ok = test(dsd),
-	    ?line ok = test(ul_res),
-	    ?line ok = test(seqofseq),
-	    ?line ok = test('InsertSubscriberDataArg');
+	    ok = test(isd),
+	    ok = test(isd2),
+	    ok = test(dsd),
+	    ok = test(ul_res),
+	    ok = test(seqofseq),
+	    ok = test('InsertSubscriberDataArg');
 	_ ->
 	    ok
     end,
-    ?line ok = test(mvrasn6,'InsertSubscriberDataArg').
+    ok = test(mvrasn6,'InsertSubscriberDataArg').
 
 test(isd)->
     EncPdu = <<48,128,129,7,145,148,113,50,1,0,241,131,1,0,176,128,5,0,
@@ -142,7 +144,40 @@ test('InsertSubscriberDataArg') ->
     ok.
 
 test(mvrasn6,'InsertSubscriberDataArg') ->
-    Val = {'InsertSubscriberDataArg',"IMSI","Address","C",serviceGranted,["abc","cde"],["tele","serv","ice"],asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,{'NAEA-PreferredCI',"NCC",asn1_NOVALUE},{'GPRSSubscriptionData','NULL',[{'PDP-Context',49,"PT","PDP-Address","QoS",'NULL',"APN",asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}],asn1_NOVALUE},'NULL',onlyMSC,{'LSAInformation','NULL',accessOutsideLSAsAllowed,[{'LSAData',"LSA","L",'NULL',asn1_NOVALUE},{'LSAData',"LSA","L",'NULL',asn1_NOVALUE}],asn1_NOVALUE},'NULL',{'LCSInformation',["Addr","ess","string"],[{'LCS-PrivacyClass',"S","ExtSS",notifyLocationAllowed,[{'ExternalClient',{'LCSClientExternalID',"Addr",asn1_NOVALUE},asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}],[broadcastService,anonymousLocation,targetMSsubscribedService],asn1_NOVALUE}],asn1_NOVALUE},100,"age",{'MC-SS-Info',"S","ExtSS",5,4,asn1_NOVALUE},"C",{'SGSN-CAMEL-SubscriptionInfo',{'GPRS-CSI',[{'GPRS-CamelTDPData',attach,13,"Addr",continueTransaction,asn1_NOVALUE}],11,asn1_NOVALUE,'NULL','NULL'},{'SMS-CSI',[{'SMS-CAMEL-TDP-DataList','sms-CollectedInfo',13,"Addr",continueTransaction,asn1_NOVALUE}],11,asn1_NOVALUE,'NULL','NULL'},asn1_NOVALUE},"ON"},
-    {ok,Bytes} = 'Mvrasn6':encode('InsertSubscriberDataArg', Val),
-    {ok,_} = 'Mvrasn6':decode('InsertSubscriberDataArg', Bytes),
+    Val = {'InsertSubscriberDataArg',<<"IMSI">>,<<"Address">>,<<"C">>,
+	   serviceGranted,[<<"abc">>,<<"cde">>],
+	   [<<"tele">>,<<"serv">>,<<"ice">>],
+	   asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,
+	   asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE,
+	   {'NAEA-PreferredCI',<<"NCC">>,asn1_NOVALUE},
+	   {'GPRSSubscriptionData','NULL',
+	    [{'PDP-Context',49,<<"PT">>,<<"PDP-Address">>,<<"QoS">>,
+	      'NULL',<<"APN">>,asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}],
+	    asn1_NOVALUE},'NULL',onlyMSC,
+	   {'LSAInformation','NULL',accessOutsideLSAsAllowed,
+	    [{'LSAData',<<"LSA">>,<<"L">>,'NULL',asn1_NOVALUE},
+	     {'LSAData',<<"LSA">>,<<"L">>,'NULL',asn1_NOVALUE}],
+	    asn1_NOVALUE},'NULL',
+	   {'LCSInformation',[<<"Addr">>,<<"ess">>,<<"string">>],
+	    [{'LCS-PrivacyClass',<<"S">>,<<"ExtSS">>,notifyLocationAllowed,
+	      [{'ExternalClient',
+		{'LCSClientExternalID',<<"Addr">>,asn1_NOVALUE},
+		asn1_NOVALUE,asn1_NOVALUE,asn1_NOVALUE}],
+	      [broadcastService,anonymousLocation,targetMSsubscribedService],
+	      asn1_NOVALUE}],asn1_NOVALUE},
+	   100,<<"age">>,
+	   {'MC-SS-Info',<<"S">>,<<"ExtSS">>,5,4,asn1_NOVALUE},
+	   <<"C">>,
+	   {'SGSN-CAMEL-SubscriptionInfo',
+	    {'GPRS-CSI',
+	     [{'GPRS-CamelTDPData',attach,13,<<"Addr">>,
+	       continueTransaction,asn1_NOVALUE}],
+	     11,asn1_NOVALUE,'NULL','NULL'},
+	    {'SMS-CSI',
+	     [{'SMS-CAMEL-TDP-Data','sms-CollectedInfo',
+	       13,<<"Addr">>,continueTransaction,asn1_NOVALUE}],
+	     11,asn1_NOVALUE,'NULL','NULL'},
+	    asn1_NOVALUE},
+	   <<"ON">>},
+    asn1_test_lib:roundtrip('Mvrasn6', 'InsertSubscriberDataArg', Val),
     ok.

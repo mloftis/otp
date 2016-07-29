@@ -1,23 +1,25 @@
 %%
 %% %CopyrightBegin%
 %% 
-%% Copyright Ericsson AB 1997-2013. All Rights Reserved.
+%% Copyright Ericsson AB 1997-2016. All Rights Reserved.
 %% 
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
-%% 
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %% 
 %% %CopyrightEnd%
 %%
 %%
 -module(asn1ct_value).
+-compile([{nowarn_deprecated_function,{asn1rt,utf8_list_to_binary,1}}]).
 
 %%  Generate Erlang values for ASN.1 types.
 %%  The value is randomized within it's constraints
@@ -260,7 +262,11 @@ from_type_prim(M, D) ->
 	'BOOLEAN' ->
 	    true;
 	'OCTET STRING' ->
-	    adjust_list(size_random(C),c_string(C,"OCTET STRING"));
+	    S0 = adjust_list(size_random(C), c_string(C, "OCTET STRING")),
+	    case M:legacy_erlang_types() of
+		false -> list_to_binary(S0);
+		true -> S0
+	    end;
 	'NumericString' ->
 	    adjust_list(size_random(C),c_string(C,"0123456789"));
 	'TeletexString' ->
@@ -347,9 +353,7 @@ random_unnamed_bit_string(M, C) ->
 %%     end.
 
 random(Upper) ->
-    {A1,A2,A3} = erlang:now(),
-    random:seed(A1,A2,A3),
-    random:uniform(Upper).
+    rand:uniform(Upper).
 
 size_random(C) ->
     case get_constraint(C,'SizeConstraint') of

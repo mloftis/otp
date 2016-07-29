@@ -1,28 +1,24 @@
-%% -*- coding: utf-8 -*-
 %% 
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2003-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2003-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %% 
 
 -module(snmp_agent_test).
-
-%% TODO
-%% * Test fault-tolerance (kill master etc)
-%%
 
 -export([
 	 all/0, 
@@ -42,7 +38,7 @@
 	 v1_processing/1, 
 	 big/1, 
 	 big2/1,
-	 loop_mib/1, 
+	 loop_mib_1/1,
 	 api/1, 
 	 subagent/1, 
 	 mnesia/1, 
@@ -303,7 +299,6 @@
 	 %% tickets2
 	 otp8395/1, 
 	 otp9884/1
-
 	]).
 
 %% Internal exports
@@ -395,8 +390,9 @@
 	 usm_read/0, 
 	 usm_del_user/0, 
 	 usm_bad/0, 
-	 loop_mib_1/0, 
-	 loop_mib_2/0, 
+	 loop_mib_1_test/0,
+	 loop_mib_2_test/0,
+	 loop_mib_3_test/0,
 	 otp_1129_i/1, 
 	 otp_1162_test/0, 
 	 otp_1131_test/0, 
@@ -425,15 +421,11 @@
 -define(application, snmp).
 
 -include_lib("kernel/include/file.hrl").
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 -include("snmp_test_lib.hrl").
 -define(SNMP_USE_V3, true).
 -include_lib("snmp/include/snmp_types.hrl").
 -include_lib("snmp/src/agent/snmpa_atl.hrl").
-
-%% -include_lib("snmp/include/SNMP-COMMUNITY-MIB.hrl").
-%% -include_lib("snmp/include/SNMP-VIEW-BASED-ACM-MIB.hrl").
-%% -include_lib("snmp/include/SNMP-USER-BASED-SM-MIB.hrl").
 
 
 -define(klas1, [1,3,6,1,2,1,7]).
@@ -522,9 +514,13 @@ groups() ->
      {mib_storage_varm_mnesia,       [], varm_mib_storage_mnesia_cases()},
      {misc,                          [], misc_cases()}, 
      {test_v1,                       [], v1_cases()},
+     {test_v1_ipv6,                  [], v1_cases_ipv6()},
      {test_v2,                       [], v2_cases()},
+     {test_v2_ipv6,                  [], v2_cases_ipv6()},
      {test_v1_v2,                    [], v1_v2_cases()},
+     {test_v1_v2_ipv6,               [], v1_v2_cases()},
      {test_v3,                       [], v3_cases()},
+     {test_v3_ipv6,                  [], v3_cases_ipv6()},
      {test_multi_threaded,           [], mt_cases()},
      {multiple_reqs,                 [], mul_cases()},
      {multiple_reqs_2,               [], mul_cases_2()},
@@ -533,6 +529,7 @@ groups() ->
      {v3_inform,                     [], v3_inform_cases()}, 
      {v3_security,                   [], v3_security_cases()}, 
      {standard_mibs,                 [], standard_mibs_cases()}, 
+     {standard_mibs_ipv6,            [], standard_mibs_cases_ipv6()},
      {standard_mibs_2,               [], standard_mibs2_cases()}, 
      {standard_mibs_3,               [], standard_mibs3_cases()}, 
      {reported_bugs,                 [], reported_bugs_cases()}, 
@@ -547,8 +544,9 @@ groups() ->
 
 init_per_suite(Config0) when is_list(Config0) ->
 
-    ?DBG("init_per_suite -> entry with"
-	 "~n   Config0: ~p", [Config0]),
+    p("init_per_suite -> entry with"
+      "~n      Config: ~p"
+      "~n      Nodes:  ~p", [Config0, erlang:nodes()]),
 
     Config1   = snmp_test_lib:init_suite_top_dir(?MODULE, Config0), 
     Config2   = snmp_test_lib:fix_data_dir(Config1),
@@ -559,16 +557,32 @@ init_per_suite(Config0) when is_list(Config0) ->
 
     Config3 = [{mib_dir, MibDir}, {std_mib_dir, StdMibDir} | Config2],
 
-    ?DBG("init_per_suite -> end with"
-	 "~n   Config3: ~p", [Config3]),
+    snmp_test_mgr_counter_server:start(), 
+
+    p("init_per_suite -> end when"
+      "~n      Config: ~p"
+      "~n      Nodes:  ~p", [Config3, erlang:nodes()]),
 
     Config3.
 
 end_per_suite(Config) when is_list(Config) ->
 
-    ?DBG("end_per_suite -> entry with"
-	 "~n   Config: ~p", [Config]),
+    p("end_per_suite -> entry with"
+      "~n      Config: ~p"
+      "~n      Nodes:  ~p", [Config, erlang:nodes()]),
 
+    case snmp_test_mgr_counter_server:stop() of
+    	{ok, _Counters} ->
+    	    p("end_per_suite -> sucessfully stopped counter server"
+	      "~n      Counters: ~p", [_Counters]);
+    
+    	{error, Reason} ->
+    	    p("end_per_suite -> failed stopping counter server"
+	      "~n      Reason: ~p", [Reason])
+    end,
+
+    p("end_per_suite -> end when"
+      "~n      Nodes:  ~p", [erlang:nodes()]),
     Config.
 
 
@@ -598,6 +612,14 @@ init_per_group(test_v2 = GroupName, Config) ->
     init_v2(snmp_test_lib:init_group_top_dir(GroupName, Config));
 init_per_group(test_v1 = GroupName, Config) -> 
     init_v1(snmp_test_lib:init_group_top_dir(GroupName, Config));
+init_per_group(test_v1_ipv6 = GroupName, Config) ->
+    init_per_group_ipv6(GroupName, Config, fun init_v1/1);
+init_per_group(test_v2_ipv6 = GroupName, Config) ->
+    init_per_group_ipv6(GroupName, Config, fun init_v2/1);
+init_per_group(test_v1_v2_ipv6 = GroupName, Config) ->
+    init_per_group_ipv6(GroupName, Config, fun init_v1_v2/1);
+init_per_group(test_v3_ipv6 = GroupName, Config) ->
+    init_per_group_ipv6(GroupName, Config, fun init_v3/1);
 init_per_group(misc = GroupName, Config) -> 
     init_misc(snmp_test_lib:init_group_top_dir(GroupName, Config));
 init_per_group(mib_storage_varm_mnesia = GroupName, Config) -> 
@@ -624,6 +646,25 @@ init_per_group(mib_storage_ets = GroupName, Config) ->
 init_per_group(GroupName, Config) ->
     snmp_test_lib:init_group_top_dir(GroupName, Config).
 
+init_per_group_ipv6(GroupName, Config, Init) ->
+    case ct:require(ipv6_hosts) of
+	ok ->
+	    case gen_udp:open(0, [inet6]) of
+		{ok, S} ->
+		    ok = gen_udp:close(S),
+		    Init(
+		      snmp_test_lib:init_group_top_dir(
+			GroupName,
+			[{ipfamily, inet6},
+			 {ip, ?LOCALHOST(inet6)}
+			 | lists:keydelete(ip, 1, Config)]));
+		{error, _} ->
+		    {skip, "Host seems to not support IPv6"}
+	    end;
+	_ ->
+	    {skip, "Host does not support IPV6"}
+    end.
+
 end_per_group(all_tcs, Config) ->
     finish_all(Config);
 end_per_group(otp7157, Config) -> 
@@ -642,31 +683,39 @@ end_per_group(multiple_reqs_3, Config) ->
     finish_mul(Config);
 end_per_group(test_multi_threaded, Config) -> 
 	finish_mt(Config);
-end_per_group(test_v3, Config) -> 
+end_per_group(test_v3_ipv6, Config) ->
 	finish_v3(Config);
-end_per_group(test_v1_v2, Config) -> 
+end_per_group(test_v1_v2_ipv6, Config) ->
 	finish_v1_v2(Config);
-end_per_group(test_v2, Config) -> 
+end_per_group(test_v2_ipv6, Config) ->
 	finish_v2(Config);
-end_per_group(test_v1, Config) -> 
+end_per_group(test_v1_ipv6, Config) ->
 	finish_v1(Config);
-end_per_group(misc, Config) -> 
+end_per_group(test_v3, Config) ->
+	finish_v3(Config);
+end_per_group(test_v1_v2, Config) ->
+	finish_v1_v2(Config);
+end_per_group(test_v2, Config) ->
+	finish_v2(Config);
+end_per_group(test_v1, Config) ->
+	finish_v1(Config);
+end_per_group(misc, Config) ->
 	finish_misc(Config);
-end_per_group(mib_storage_varm_mnesia, Config) -> 
+end_per_group(mib_storage_varm_mnesia, Config) ->
 	finish_varm_mib_storage_mnesia(Config);
-end_per_group(mib_storage_varm_dets, Config) -> 
+end_per_group(mib_storage_varm_dets, Config) ->
 	finish_varm_mib_storage_dets(Config);
-end_per_group(mib_storage_size_check_mnesia, Config) -> 
+end_per_group(mib_storage_size_check_mnesia, Config) ->
 	finish_size_check_msm(Config);
-end_per_group(mib_storage_size_check_dets, Config) -> 
+end_per_group(mib_storage_size_check_dets, Config) ->
 	finish_size_check_msd(Config);
-end_per_group(mib_storage_size_check_ets, Config) -> 
+end_per_group(mib_storage_size_check_ets, Config) ->
 	finish_size_check_mse(Config);
-end_per_group(mib_storage_mnesia, Config) -> 
+end_per_group(mib_storage_mnesia, Config) ->
 	finish_mib_storage_mnesia(Config);
-end_per_group(mib_storage_dets, Config) -> 
+end_per_group(mib_storage_dets, Config) ->
 	finish_mib_storage_dets(Config);
-end_per_group(mib_storage_ets, Config) -> 
+end_per_group(mib_storage_ets, Config) ->
 	finish_mib_storage_ets(Config);
 end_per_group(_GroupName, Config) ->
 	Config.
@@ -676,10 +725,16 @@ end_per_group(_GroupName, Config) ->
 %% ---- Init Per TestCase ---- 
 
 init_per_testcase(Case, Config) when is_list(Config) ->
-    ?DBG("init_per_testcase -> entry with"
-	 "~n   Config: ~p", [Config]),
+    p("init_per_testcase -> entry with"
+      "~n   Config: ~p"
+      "~n   Nodes:  ~p", [Config, erlang:nodes()]),
 
-    init_per_testcase1(Case, Config).
+    Result = init_per_testcase1(Case, Config),
+
+    p("init_per_testcase -> done when"
+      "~n      Result: ~p"
+      "~n      Nodes:  ~p", [Result, erlang:nodes()]),
+    Result.
 
 init_per_testcase1(otp8395 = Case, Config) when is_list(Config) ->
     ?DBG("init_per_testcase1 -> entry with"
@@ -720,12 +775,18 @@ init_per_testcase1(_Case, Config) when is_list(Config) ->
 %% ---- End Per TestCase ---- 
 
 end_per_testcase(Case, Config) when is_list(Config) ->
-    ?DBG("end_per_testcase -> entry with"
-	 "~n   Config: ~p", [Config]),
+    p("end_per_testcase -> entry with"
+      "~n   Config: ~p"
+      "~n   Nodes:  ~p", [Config, erlang:nodes()]),
 
     display_log(Config),
     
-    end_per_testcase1(Case, Config).
+    Result = end_per_testcase1(Case, Config),
+
+    p("end_per_testcase -> done with"
+      "~n   Result: ~p"
+      "~n   Nodes:  ~p", [Result, erlang:nodes()]),
+    Result.
 
 end_per_testcase1(otp8395, Config) when is_list(Config) ->
     otp8395({fin, Config});
@@ -785,6 +846,10 @@ cases() ->
      {group, test_v2},
      {group, test_v1_v2}, 
      {group, test_v3},
+     {group, test_v1_ipv6},
+     {group, test_v2_ipv6},
+     {group, test_v1_v2_ipv6},
+     {group, test_v3_ipv6},
      {group, test_multi_threaded}, 
      {group, mib_storage},
      {group, tickets1}
@@ -840,8 +905,8 @@ start_v2_agent(Config) ->
 start_v2_agent(Config, Opts) ->
     snmp_agent_test_lib:start_v2_agent(Config, Opts).
 
-start_v3_agent(Config) ->
-    snmp_agent_test_lib:start_v3_agent(Config).
+%% start_v3_agent(Config) ->
+%%     snmp_agent_test_lib:start_v3_agent(Config).
 
 start_v3_agent(Config, Opts) ->
     snmp_agent_test_lib:start_v3_agent(Config, Opts).
@@ -1174,7 +1239,7 @@ mse_simple(X)         -> ?P(mse_simple), simple(X).
 mse_v1_processing(X)  -> ?P(mse_v1_processing), v1_processing(X).
 mse_big(X)            -> ?P(mse_big), big(X).
 mse_big2(X)           -> ?P(mse_big2), big2(X).
-mse_loop_mib(X)       -> ?P(mse_loop_mib), loop_mib(X).
+mse_loop_mib(X)       -> ?P(mse_loop_mib), loop_mib_1(X).
 mse_api(X)            -> ?P(mse_api), api(X).
 mse_sa_register(X)    -> ?P(mse_sa_register), sa_register(X).
 mse_v1_trap(X)        -> ?P(mse_v1_trap), v1_trap(X).
@@ -1195,7 +1260,7 @@ msd_simple(X)         -> ?P(msd_simple), simple(X).
 msd_v1_processing(X)  -> ?P(msd_v1_processing), v1_processing(X).
 msd_big(X)            -> ?P(msd_big), big(X).
 msd_big2(X)           -> ?P(msd_big2), big2(X).
-msd_loop_mib(X)       -> ?P(msd_loop_mib), loop_mib(X).
+msd_loop_mib(X)       -> ?P(msd_loop_mib), loop_mib_1(X).
 msd_api(X)            -> ?P(msd_api), api(X).
 msd_sa_register(X)    -> ?P(msd_sa_register), sa_register(X).
 msd_v1_trap(X)        -> ?P(msd_v1_trap), v1_trap(X).
@@ -1216,7 +1281,7 @@ msm_simple(X)         -> ?P(msm_simple), simple(X).
 msm_v1_processing(X)  -> ?P(msm_v1_processing), v1_processing(X).
 msm_big(X)            -> ?P(msm_big2), big(X).
 msm_big2(X)           -> ?P(msm_loop_mib), big2(X).
-msm_loop_mib(X)       -> ?P(msm_loop_mib), loop_mib(X).
+msm_loop_mib(X)       -> ?P(msm_loop_mib), loop_mib_1(X).
 msm_api(X)            -> ?P(msm_api), api(X).
 msm_sa_register(X)    -> ?P(msm_sa_register), sa_register(X).
 msm_v1_trap(X)        -> ?P(msm_v1_trap), v1_trap(X).
@@ -1525,11 +1590,11 @@ app_info(Config) when is_list(Config) ->
 	    false ->
 		"undefined"
 	end,
-    io:format("Root dir: ~s~n"
-	      "SNMP:   Application dir: ~s~n"
-	      "        Application ver: ~s~n"
-	      "SSL:    Application dir: ~s~n"
-	      "CRYPTO: Application dir: ~s~n", 
+    io:format("Root dir: ~ts~n"
+	      "SNMP:   Application dir: ~ts~n"
+	      "        Application ver: ~ts~n"
+	      "SSL:    Application dir: ~ts~n"
+	      "CRYPTO: Application dir: ~ts~n",
 	      [code:root_dir(), SnmpDir, AppVsn, SslDir, CryptoDir]),
     ok.
 
@@ -1544,7 +1609,8 @@ app_dir(App) ->
 create_local_db_dir(Config) when is_list(Config) ->
     ?P(create_local_db_dir),
     DataDir = snmp_test_lib:lookup(data_dir, Config),
-    T = erlang:now(),
+    UName = erlang:unique_integer([positive]),
+    T = {UName, UName, UName},
     [As,Bs,Cs] = [integer_to_list(I) || I <- tuple_to_list(T)],
     DbDir = filename:join([DataDir, As, Bs, Cs]),
     ok = del_dir(DbDir, 3),
@@ -1611,7 +1677,7 @@ del_dir(Dir, Depth) ->
             ok
     end.
 
-%v1_cases() -> [loop_mib];
+%v1_cases() -> [loop_mib_1];
 v1_cases() -> 
     [
      simple, 
@@ -1619,7 +1685,7 @@ v1_cases() ->
      v1_processing, 
      big, 
      big2,
-     loop_mib, 
+     loop_mib_1,
      api, 
      subagent, 
      mnesia, 
@@ -1637,14 +1703,40 @@ v1_cases() ->
      change_target_addr_config
     ].  
 
+v1_cases_ipv6() ->
+    [
+     simple,
+     v1_processing,
+     loop_mib_1,
+%%     big,
+%%     big2,
+     api,
+     subagent,
+%%     mnesia,
+%%     {group, multiple_reqs},
+     sa_register,
+%%     v1_trap, % sends v1 trap
+%%     sa_error,
+     next_across_sa,
+     undo,
+%%     {group, reported_bugs},
+     {group, standard_mibs_ipv6},
+     sparse_table,
+%%     cnt_64, % sends v1 trap
+     opaque
+%%     change_target_addr_config % sends v1 trap
+    ].
+
 init_v1(Config) when is_list(Config) ->
     ?line SaNode = ?config(snmp_sa, Config),
     ?line create_tables(SaNode),
     ?line AgentConfDir = ?config(agent_conf_dir, Config),
     ?line MgrDir = ?config(mgr_dir, Config),
     ?line Ip = ?config(ip, Config),
-    ?line config([v1], MgrDir, AgentConfDir, 
-		 tuple_to_list(Ip), tuple_to_list(Ip)),
+    ?line IpFamily = config_ipfamily(Config),
+    ?line config(
+	    [v1], MgrDir, AgentConfDir,
+	    tuple_to_list(Ip), tuple_to_list(Ip), IpFamily),
     [{vsn, v1} | start_v1_agent(Config)].
 
 finish_v1(Config) when is_list(Config) ->
@@ -1681,14 +1773,43 @@ v2_cases() ->
      v2_caps
     ].
 
+v2_cases_ipv6() ->
+    [
+     simple_2,
+     v2_processing,
+%%     big_2,
+%%     big2_2,
+     loop_mib_2,
+     api_2,
+     subagent_2,
+%%     mnesia_2,
+%%     {group, multiple_reqs_2},
+     sa_register_2,
+     v2_trap,
+     {group, v2_inform},
+%%     sa_error_2,
+     next_across_sa_2,
+     undo_2,
+%%     {group, reported_bugs_2},
+     {group, standard_mibs_2},
+     v2_types,
+     implied,
+     sparse_table_2,
+     cnt_64_2,
+     opaque_2,
+     v2_caps
+    ].
+
 init_v2(Config) when is_list(Config) ->
     SaNode = ?config(snmp_sa, Config),
     create_tables(SaNode),
     AgentConfDir = ?config(agent_conf_dir, Config),
     MgrDir = ?config(mgr_dir, Config),
     Ip = ?config(ip, Config),
-    config([v2], MgrDir, AgentConfDir, 
-	   tuple_to_list(Ip), tuple_to_list(Ip)),
+    IpFamily = config_ipfamily(Config),
+    config(
+      [v2], MgrDir, AgentConfDir,
+      tuple_to_list(Ip), tuple_to_list(Ip), IpFamily),
     [{vsn, v2} | start_v2_agent(Config)].
 
 finish_v2(Config) when is_list(Config) ->
@@ -1707,8 +1828,9 @@ init_v1_v2(Config) when is_list(Config) ->
     AgentConfDir = ?config(agent_conf_dir, Config),
     MgrDir = ?config(mgr_dir, Config),
     Ip = ?config(ip, Config),
+    IpFamily = config_ipfamily(Config),
     config([v1,v2], MgrDir, AgentConfDir, 
-	   tuple_to_list(Ip), tuple_to_list(Ip)),
+	   tuple_to_list(Ip), tuple_to_list(Ip), IpFamily),
     [{vsn, bilingual} | start_bilingual_agent(Config)].
 
 finish_v1_v2(Config) when is_list(Config) ->
@@ -1746,6 +1868,34 @@ v3_cases() ->
      v2_caps_3
     ].
 
+v3_cases_ipv6() ->
+    [
+     simple_3,
+     v3_processing,
+%%     big_3,
+%%     big2_3,
+     api_3,
+     subagent_3,
+%%     mnesia_3,
+     loop_mib_3,
+%%     {group, multiple_reqs_3},
+     sa_register_3,
+     v3_trap,
+     {group, v3_inform},
+%%     sa_error_3,
+     next_across_sa_3,
+     undo_3,
+%%     {group, reported_bugs_3},
+     {group, standard_mibs_3},
+     {group, v3_security},
+     v2_types_3,
+     implied_3,
+     sparse_table_3,
+     cnt_64_3,
+     opaque_3,
+     v2_caps_3
+    ].
+
 init_v3(Config) when is_list(Config) ->
     %% Make sure crypto works, otherwise start_agent will fail
     %% and we will be stuck with a bunch of mnesia tables for
@@ -1767,9 +1917,16 @@ init_v3(Config) when is_list(Config) ->
     AgentConfDir = ?config(agent_conf_dir, Config),
     MgrDir = ?config(mgr_dir, Config),
     Ip = ?config(ip, Config),
-    ?line ok = config([v3], MgrDir, AgentConfDir, 
-		      tuple_to_list(Ip), tuple_to_list(Ip)),
-    [{vsn, v3} | start_v3_agent(Config)].
+    IpFamily = config_ipfamily(Config),
+    ?line ok =
+	config(
+	  [v3], MgrDir, AgentConfDir,
+	  tuple_to_list(Ip), tuple_to_list(Ip), IpFamily),
+    Opts =
+	[{master_agent_verbosity, trace},
+	 {agent_verbosity, trace},
+	 {net_if_verbosity, trace}],
+    [{vsn, v3} | start_v3_agent(Config, Opts)].
 
 finish_v3(Config) when is_list(Config) ->
     delete_tables(),
@@ -2096,9 +2253,9 @@ await_dummy_manager_started(Pid) ->
 	    {ok,Pid,Port};
 	{'EXIT', Pid, Reason} ->
 	    {error, Pid, Reason};
-	O ->
+	_O ->
 	    ?LOG("dummy_manager_start -> received unknown message:"
-		 "~n   ~p",[O]),
+		 "~n   ~p",[_O]),
 	    await_dummy_manager_started(Pid)
     end.
 
@@ -2121,16 +2278,16 @@ dummy_manager_send_trap2(Pid) ->
 dummy_manager_await_trap2_ack() ->
     ?DBG("dummy_manager_await_trap2 -> entry",[]),
     receive
-	{received_trap,Trap} ->
-	    ?LOG("dummy_manager_await_trap2 -> received trap: ~p",[Trap]),
+	{received_trap, _Trap} ->
+	    ?LOG("dummy_manager_await_trap2 -> received trap: ~p", [_Trap]),
 	    %% Note: 
 	    %% Without this sleep the v2_inform_i testcase failes! There
 	    %% is no relation between these two test cases as far as I
 	    %% able to figure out...
 	    ?SLEEP(60000),
 	    ok;
-	O ->
-	    ?ERR("dummy_manager_await_trap2 -> unexpected message: ~p",[O]),
+	_O ->
+	    ?ERR("dummy_manager_await_trap2 -> unexpected message: ~p",[_O]),
 	    ok
     after 10000 ->
 	    ?ERR("dummy_manager_await_trap2 -> timeout",[]),
@@ -2156,32 +2313,34 @@ dummy_manager_loop(P,S,MA) ->
 		 "~n   Trap: ~p",[Trap]),
 	    snmpa:send_trap(MA, Trap, "standard trap"),
 	    dummy_manager_loop(P,S,MA);
-	{udp, _UdpId, Ip, UdpPort, Bytes} ->
+	{udp, _UdpId, _Ip, _UdpPort, Bytes} ->
 	    ?LOG("dummy_manager_loop -> received upd message"
 		 "~n   from: ~p:~p"
 		 "~n   size: ~p",
-		 [Ip, UdpPort, dummy_manager_message_sz(Bytes)]),
+		 [_Ip, _UdpPort, dummy_manager_message_sz(Bytes)]),
 	    R = dummy_manager_handle_message(Bytes),
-	    ?DBG("dummy_manager_loop -> R: ~p",[R]),
+	    ?DBG("dummy_manager_loop -> R: ~p", [R]),
 	    P ! R,
-	    dummy_manager_loop(P,S,MA);
+	    dummy_manager_loop(P, S, MA);
 	stop ->
 	    ?DBG("dummy_manager_loop -> received stop request",[]),
 	    P ! {dummy_manager_stopping, self()},
 	    gen_udp:close(S),
 	    exit(normal);
-	O ->
+	_O ->
 	    ?LOG("dummy_manager_loop -> received unknown message:"
-		 "~n   ~p",[O]),
-	    dummy_manager_loop(P,S,MA)
+		 "~n   ~p", [_O]),
+	    dummy_manager_loop(P, S, MA)
     end.
 
+-ifdef(snmp_log).
 dummy_manager_message_sz(B) when is_binary(B) ->
     size(B);
 dummy_manager_message_sz(L) when is_list(L) ->
     length(L);
 dummy_manager_message_sz(_) ->
     undefined.
+-endif.
 
 dummy_manager_handle_message(Bytes) ->
     case (catch snmp_pdus:dec_message(Bytes)) of
@@ -2285,10 +2444,6 @@ mul_cases() ->
      mul_set,
      mul_set_err
     ].
-
-
-%% multiple_reqs_3(_X) -> 
-%%     {req, [], {conf, init_mul, mul_cases_3(), finish_mul}}.
 
 
 mul_cases_2() -> 
@@ -3039,19 +3194,18 @@ v1_get_next_p() ->
     %% 4.1.3:2
     gn([[tTooBig]]),
     io:format("We currently don't handle tooBig correct!!!\n"),
-%    ?line ?expect3(tooBig, 0, [{[tTooBig], 'NULL'}]),
+
     ?line ?expect3(tooBig, 0, any),
 
     %% 4.1.3:3
     gn([[tGenErr1]]),
-%    ?line expect(40, genErr, 1, [{[tGenErr1], 'NULL'}]),
+
     ?line ?expect3(genErr, 1, any),
     gn([[tGenErr2]]),
-%    ?line ?expect3(genErr, 1, [{[tGenErr2], 'NULL'}]),
+
     ?line ?expect3(genErr, 1, any),
     gn([[sysDescr], [tGenErr3]]),
-%    ?line ?expect3(genErr, 2, [{[sysDescr], 'NULL'},
-%				 {[tGenErr3], 'NULL'}]).
+
     ?line ?expect3(genErr, 2, any).
     
 v1_set_p() ->
@@ -3290,8 +3444,7 @@ v2_set_p() ->
 %% Req. OLD-SNMPEA-MIB
 table_test() ->
     io:format("Testing simple get, next and set on communityTable...~n"),
-%% {[147,214,36,45], "public", 2, readWrite}.
-%% {[147,214,36,45], "standard trap", 2, read}.
+
     Key1c3 = [intCommunityViewIndex,get(mip),is("public")],
     Key2c3 = [intCommunityViewIndex,get(mip),is("standard trap")],
     Key1c4 = [intCommunityAccess,get(mip),is("public")],
@@ -3399,11 +3552,11 @@ simple_standard_test() ->
 db_notify_client(suite) -> [];
 db_notify_client(Config) when is_list(Config) ->
     ?P(db_notify_client), 
-    {SaNode, MgrNode, MibDir} = init_case(Config),
+    {_SaNode, _MgrNode, _MibDir} = init_case(Config),
     ?DBG("db_notify_client -> case initiated: "
 	 "~n   SaNode:  ~p"
 	 "~n   MgrNode: ~p"
-	 "~n   MibDir:  ~p", [SaNode, MgrNode, MibDir]),
+	 "~n   MibDir:  ~p", [_SaNode, _MgrNode, _MibDir]),
     ?DBG("db_notify_client -> maximize verbosity", []),
     snmpa_local_db:verbosity(trace),
     Self = self(), 
@@ -3459,8 +3612,6 @@ notify(Pid, What) ->
 
 %% Req: system group, OLD-SNMPEA-MIB, Klas1
 big_test() ->
-    %% put(sname, {?MODULE, big_test}),
-    %% put(verbosity, trace),
 
     ?DBG("big_test -> testing simple next/get/set @ master agent...",[]),
     simple_standard_test(),
@@ -4154,8 +4305,8 @@ ma_v2_inform1(MA) ->
     CmdExp = 
 	fun(ok) -> 
 		ok;
-	   ({ok, Val}) ->
-		?DBG("ma_v2_inform -> [cmd2] Val: ~p", [Val]),
+	   ({ok, _Val}) ->
+		?DBG("ma_v2_inform -> [cmd2] Val: ~p", [_Val]),
 		ok;
 	   ({error, Id, Extra}) ->
 		{error, {unexpected, Id, Extra}};
@@ -4190,10 +4341,10 @@ ma_v2_inform1(MA) ->
     CmdSnmpTargets = 
 	fun(T) ->
 		receive
-		    {snmp_targets, T, [Addr]} ->
+		    {snmp_targets, T, [_Addr]} ->
 			?DBG("ma_v2_inform1 -> "
 			     "received expected snmp_targets "
-			     "~n   with receiver: ~p",[Addr]),
+			     "~n   with receiver: ~p", [_Addr]),
 			ok;
 		    {snmp_targets, T, Addrs} ->
 			?ERR("ma_v2_inform1 -> "
@@ -4211,16 +4362,16 @@ ma_v2_inform1(MA) ->
     Cmd06 = 
 	fun() ->
 		receive
-		    {snmp_notification, Tag03, {got_response, Addr}} ->
+		    {snmp_notification, Tag03, {got_response, _Addr}} ->
 			?DBG("ma_v2_inform1 -> "
 			     "received expected snmp_notification "
-			     "[with manager response] from: ~n   ~p",[Addr]),
+			     "[with manager response] from: ~n   ~p", [_Addr]),
 			ok;
-		    {snmp_notification, Tag03, {no_response, Addr}} ->
+		    {snmp_notification, Tag03, {no_response, _Addr}} ->
 			?ERR("ma_v2_inform1 -> "
 			     "received unexpected snmp_notification "
 			     "[without manager response] from: ~n   ~p",
-			     [Addr]),
+			     [_Addr]),
 			{error, no_response}
 		after
 		    20000 ->
@@ -4250,16 +4401,16 @@ ma_v2_inform1(MA) ->
     Cmd10 = 
 	fun() ->
 		receive
-		    {snmp_notification, Tag07, {got_response, Addr}} ->
+		    {snmp_notification, Tag07, {got_response, _Addr}} ->
 			?ERR("ma_v2_inform1 -> "
 			     "received unexpected snmp_notification "
-			     "[with manager response] from: ~n   ~p", [Addr]),
+			     "[with manager response] from: ~n   ~p", [_Addr]),
 			{error, got_response};
-		    {snmp_notification, Tag07, {no_response, Addr}} ->
+		    {snmp_notification, Tag07, {no_response, _Addr}} ->
 			?DBG("ma_v2_inform1 -> "
 			     "received expected snmp_notification "
 			     "[without manager response] from: ~n   ~p",
-			     [Addr]),
+			     [_Addr]),
 			ok
 		after
 		    240000 ->
@@ -4303,8 +4454,8 @@ ma_v2_inform2(MA) ->
     CmdExp = 
 	fun(ok) -> 
 		ok;
-	   ({ok, Val}) ->
-		?DBG("ma_v2_inform -> [cmd2] Val: ~p", [Val]),
+	   ({ok, _Val}) ->
+		?DBG("ma_v2_inform -> [cmd2] Val: ~p", [_Val]),
 		ok;
 	   ({error, Id, Extra}) ->
 		{error, {unexpected, Id, Extra}};
@@ -4384,8 +4535,8 @@ ma_v2_inform3(MA) ->
 	 "~n   send notification: testTrapv22", [MA]),
 
     CmdExpectInform = 
-	fun(No, Response) ->
-		?DBG("CmdExpectInform -> ~p: ~n~p", [No, Response]),
+	fun(_No, Response) ->
+		?DBG("CmdExpectInform -> ~p: ~n~p", [_No, Response]),
 		?expect2({inform, Response},
 			 [{[sysUpTime, 0], any}, 
 			  {[snmpTrapOID, 0], ?system ++ [0,1]}])
@@ -4394,8 +4545,8 @@ ma_v2_inform3(MA) ->
     CmdExp = 
 	fun(ok) -> 
 		ok;
-	   ({ok, Val}) ->
-		?DBG("CmdExp -> Val: ~p", [Val]),
+	   ({ok, _Val}) ->
+		?DBG("CmdExp -> Val: ~p", [_Val]),
 		ok;
 	   ({error, Id, Extra}) ->
 		{error, {unexpected, Id, Extra}};
@@ -4506,17 +4657,17 @@ delivery_info(Tag, Address, DeliveryResult, Extra) ->
 
 command_handler([]) ->    
     ok;
-command_handler([{No, Desc, Cmd}|Rest]) ->
-    ?LOG("command_handler -> command ~w: ~n   ~s", [No, Desc]),
+command_handler([{_No, _Desc, Cmd}|Rest]) ->
+    ?LOG("command_handler -> command ~w: ~n   ~s", [_No, _Desc]),
     case (catch Cmd()) of
 	ok ->
-	    ?LOG("command_handler -> ~w: ok",[No]),
+	    ?LOG("command_handler -> ~w: ok", [_No]),
 	    command_handler(Rest);
 	{error, Reason} ->
-	    ?ERR("command_handler -> ~w error: ~n~p",[No, Reason]),
+	    ?ERR("command_handler -> ~w error: ~n~p", [_No, Reason]),
 	    ?line ?FAIL(Reason);
 	Error ->
-	    ?ERR("command_handler -> ~w unexpected: ~n~p",[No, Error]),
+	    ?ERR("command_handler -> ~w unexpected: ~n~p", [_No, Error]),
 	    ?line ?FAIL({unexpected_command_result, Error})
     end.
     
@@ -4683,6 +4834,15 @@ standard_mibs_cases() ->
      snmp_view_based_acm_mib
     ].
     
+standard_mibs_cases_ipv6() ->
+    [
+     %% snmp_standard_mib, % Sending v1 traps does not work over IPv6
+     snmp_community_mib,
+     snmp_framework_mib,
+     snmp_target_mib,
+     snmp_notification_mib,
+     snmp_view_based_acm_mib
+    ].
 
 %%-----------------------------------------------------------------
 %% For this test, the agent is configured for v1.
@@ -5517,57 +5677,58 @@ usm_bad() ->
 %% works.
 %% Load all std mibs that are not loaded by default.
 %%-----------------------------------------------------------------
-loop_mib(suite) -> [];
-loop_mib(Config) when is_list(Config) ->
-    ?P(loop_mib), 
-    ?LOG("loop_mib -> initiate case",[]),
-    %% snmpa:verbosity(master_agent,debug),
-    %% snmpa:verbosity(mib_server,info),
-    {SaNode, MgrNode, MibDir} = init_case(Config),
-    ?DBG("loop_mib -> ~n"
+loop_mib_1(suite) -> [];
+loop_mib_1(Config) when is_list(Config) ->
+    ?P(loop_mib_1),
+    ?LOG("loop_mib_1 -> initiate case",[]),
+
+    {_SaNode, _MgrNode, _MibDir} = init_case(Config),
+    ?DBG("loop_mib_1 -> ~n"
 	   "\tSaNode:  ~p~n"
 	   "\tMgrNode: ~p~n"
-	   "\tMibDir:  ~p",[SaNode, MgrNode, MibDir]),
-    ?DBG("loop_mib -> load mib SNMP-COMMUNITY-MIB",[]),
+	   "\tMibDir:  ~p",[_SaNode, _MgrNode, _MibDir]),
+    ?DBG("loop_mib_1 -> load mib SNMP-COMMUNITY-MIB",[]),
     ?line load_master_std("SNMP-COMMUNITY-MIB"),
-    ?DBG("loop_mib -> load mib SNMP-MPD-MIB",[]),
+    ?DBG("loop_mib_1 -> load mib SNMP-MPD-MIB",[]),
     ?line load_master_std("SNMP-MPD-MIB"),
-    ?DBG("loop_mib -> load mib SNMP-TARGET-MIB",[]),
+    ?DBG("loop_mib_1 -> load mib SNMP-TARGET-MIB",[]),
     ?line load_master_std("SNMP-TARGET-MIB"),
-    ?DBG("loop_mib -> load mib SNMP-NOTIFICATION-MIB",[]),
+    ?DBG("loop_mib_1 -> load mib SNMP-NOTIFICATION-MIB",[]),
     ?line load_master_std("SNMP-NOTIFICATION-MIB"),
-    ?DBG("loop_mib -> load mib SNMP-FRAMEWORK-MIB",[]),
+    ?DBG("loop_mib_1 -> load mib SNMP-FRAMEWORK-MIB",[]),
     ?line load_master_std("SNMP-FRAMEWORK-MIB"),
-    ?DBG("loop_mib -> load mib SNMP-VIEW-BASED-ACM-MIB",[]),
+    ?DBG("loop_mib_1 -> load mib SNMP-VIEW-BASED-ACM-MIB",[]),
     ?line load_master_std("SNMP-VIEW-BASED-ACM-MIB"),
-    ?DBG("loop_mib -> try",[]),
-    try_test(loop_mib_1),
-    ?DBG("loop_mib -> unload mib SNMP-COMMUNITY-MIB",[]),
+    ?DBG("loop_mib_1 -> try",[]),
+
+    try_test(loop_mib_1_test),
+
+    ?DBG("loop_mib_1 -> unload mib SNMP-COMMUNITY-MIB",[]),
     ?line unload_master("SNMP-COMMUNITY-MIB"),
-    ?DBG("loop_mib -> unload mib SNMP-MPD-MIB",[]),
+    ?DBG("loop_mib_1 -> unload mib SNMP-MPD-MIB",[]),
     ?line unload_master("SNMP-MPD-MIB"),
-    ?DBG("loop_mib -> unload mib SNMP-TARGET-MIB",[]),
+    ?DBG("loop_mib_1 -> unload mib SNMP-TARGET-MIB",[]),
     ?line unload_master("SNMP-TARGET-MIB"),
-    ?DBG("loop_mib -> unload mib SNMP-NOTIFICATION-MIB",[]),
+    ?DBG("loop_mib_1 -> unload mib SNMP-NOTIFICATION-MIB",[]),
     ?line unload_master("SNMP-NOTIFICATION-MIB"),
-    ?DBG("loop_mib -> unload mib SNMP-FRAMEWORK-MIB",[]),
+    ?DBG("loop_mib_1 -> unload mib SNMP-FRAMEWORK-MIB",[]),
     ?line unload_master("SNMP-FRAMEWORK-MIB"),
-    ?DBG("loop_mib -> unload mib SNMP-VIEW-BASED-ACM-MIB",[]),
+    ?DBG("loop_mib_1 -> unload mib SNMP-VIEW-BASED-ACM-MIB",[]),
     ?line unload_master("SNMP-VIEW-BASED-ACM-MIB"),
     %% snmpa:verbosity(master_agent,log),
     %% snmpa:verbosity(mib_server,silence),
-    ?LOG("loop_mib -> done",[]).
+    ?LOG("loop_mib_1 -> done",[]).
     
 
 loop_mib_2(suite) -> [];
 loop_mib_2(Config) when is_list(Config) ->
     ?P(loop_mib_2), 
     ?LOG("loop_mib_2 -> initiate case",[]),
-    {SaNode, MgrNode, MibDir} = init_case(Config),
-    ?DBG("loop_mib_2 -> ~n"
+    {_SaNode, _MgrNode, _MibDir} = init_case(Config),
+    ?DBG("do_loop_mib_2 -> ~n"
 	   "\tSaNode:  ~p~n"
 	   "\tMgrNode: ~p~n"
-	   "\tMibDir:  ~p",[SaNode, MgrNode, MibDir]),
+	   "\tMibDir:  ~p", [_SaNode, _MgrNode, _MibDir]),
     ?DBG("loop_mib_2 -> load mibs",[]),
     ?line load_master_std("SNMP-COMMUNITY-MIB"),
     ?line load_master_std("SNMP-MPD-MIB"),
@@ -5575,7 +5736,9 @@ loop_mib_2(Config) when is_list(Config) ->
     ?line load_master_std("SNMP-NOTIFICATION-MIB"),
     ?line load_master_std("SNMP-FRAMEWORK-MIB"),
     ?line load_master_std("SNMP-VIEW-BASED-ACM-MIB"),
-    try_test(loop_mib_2),
+
+    try_test(loop_mib_2_test),
+
     ?DBG("loop_mib_2 -> unload mibs",[]),
     ?line unload_master("SNMP-COMMUNITY-MIB"),
     ?line unload_master("SNMP-MPD-MIB"),
@@ -5590,18 +5753,18 @@ loop_mib_3(suite) -> [];
 loop_mib_3(Config) when is_list(Config) ->
     ?P(loop_mib_3), 
     ?LOG("loop_mib_3 -> initiate case",[]),
-    {SaNode, MgrNode, MibDir} = init_case(Config),
+    {_SaNode, _MgrNode, _MibDir} = init_case(Config),
     ?DBG("loop_mib_3 -> ~n"
 	   "\tSaNode:  ~p~n"
 	   "\tMgrNode: ~p~n"
-	   "\tMibDir:  ~p",[SaNode, MgrNode, MibDir]),
+	   "\tMibDir:  ~p", [_SaNode, _MgrNode, _MibDir]),
     ?DBG("loop_mib_3 -> load mibs",[]),
     ?line load_master_std("SNMP-TARGET-MIB"),
     ?line load_master_std("SNMP-NOTIFICATION-MIB"),
     ?line load_master_std("SNMP-VIEW-BASED-ACM-MIB"),
     ?line load_master_std("SNMP-USER-BASED-SM-MIB"),
 
-    try_test(loop_mib_2),
+    try_test(loop_mib_3_test),
 
     ?DBG("loop_mib_3 -> unload mibs",[]),
     ?line unload_master("SNMP-TARGET-MIB"),
@@ -5612,17 +5775,16 @@ loop_mib_3(Config) when is_list(Config) ->
 
 
 %% Req. As many mibs all possible
-loop_mib_1() ->
-    ?DBG("loop_mib_1 -> entry",[]),
+loop_mib_1_test() ->
+    ?DBG("loop_mib_1_test -> entry",[]),
     N = loop_it_1([1,1], 0),
     io:format(user, "found ~w varibles\n", [N]),
     ?line N = if N < 100 -> 100;
 		 true -> N
 	      end.
-	    
 
 loop_it_1(Oid, N) ->
-    ?DBG("loop_it_1 -> entry with~n"
+    ?DBG("loop_it_1_test -> entry with~n"
 	   "\tOid: ~p~n"
 	   "\tN:   ~p",[Oid,N]),
     case get_next_req([Oid]) of
@@ -5630,13 +5792,13 @@ loop_it_1(Oid, N) ->
 	     error_status = noError, 
 	     error_index  = 0,
 	     varbinds     = [#varbind{oid   = NOid,
-				      value = Value}]} when NOid > Oid ->
-	    ?DBG("loop_it_1 -> "
+				      value = _Value}]} when NOid > Oid ->
+	    ?DBG("loop_it_1_test -> "
 		   "~n   NOid:  ~p"
-		   "~n   Value: ~p",[NOid, Value]),
-	    ?line [Value2] = get_req(1, [NOid]), % must not be same
-	    ?DBG("loop_it_1 -> "
-		   "~n   Value2: ~p",[Value2]),
+		   "~n   Value: ~p", [NOid, _Value]),
+	    ?line [_Value2] = get_req(1, [NOid]), % must not be same
+	    ?DBG("loop_it_1_test -> "
+		   "~n   Value2: ~p", [_Value2]),
 	    loop_it_1(NOid, N+1);
 
 	#pdu{type         = 'get-response', 
@@ -5649,7 +5811,7 @@ loop_it_1(Oid, N) ->
 	     error_status = noSuchName, 
 	     error_index = 1,
 	     varbinds    = [_]} ->
-	    ?DBG("loop_it_1 -> done: ~p",[N]),
+	    ?DBG("loop_it_1_test -> done: ~p",[N]),
 	    N;
 
 	#pdu{type         = 'get-response', 
@@ -5670,14 +5832,13 @@ loop_it_1(Oid, N) ->
 	    
 
 %% Req. As many mibs all possible
-loop_mib_2() ->
-    ?DBG("loop_mib_1 -> entry",[]),
+loop_mib_2_test() ->
+    ?DBG("loop_mib_2_test -> entry",[]),
     N = loop_it_2([1,1], 0),
     io:format(user, "found ~w varibles\n", [N]),
     ?line N = if N < 100 -> 100;
 		 true -> N
 	      end.
-    
 
 loop_it_2(Oid, N) ->
     ?DBG("loop_it_2 -> entry with"
@@ -5687,22 +5848,22 @@ loop_it_2(Oid, N) ->
 	#pdu{type         = 'get-response', 
 	     error_status = noError, 
 	     error_index  = 0,
-	     varbinds     = [#varbind{oid = NOid, value = endOfMibView}]} ->
+	     varbinds     = [#varbind{oid = _NOid, value = endOfMibView}]} ->
 	    ?DBG("loop_it_2 -> "
-		 "~n   NOid: ~p",[NOid]),
+		 "~n   NOid: ~p", [_NOid]),
 	    N;
 
 	#pdu{type         = 'get-response', 
 	     error_status = noError, 
 	     error_index  = 0,
 	     varbinds     = [#varbind{oid   = NOid,
-				      value = Value}]} when NOid > Oid ->
+				      value = _Value}]} when NOid > Oid ->
 	    ?DBG("loop_it_2 -> "
 		 "~n   NOid:  ~p"
-		 "~n   Value: ~p",[NOid, Value]),
-	    ?line [Value2] = get_req(1, [NOid]), % must not be same
+		 "~n   Value: ~p", [NOid, _Value]),
+	    ?line [_Value2] = get_req(1, [NOid]), % must not be same
 	    ?DBG("loop_it_2 -> "
-		 "~n   Value2: ~p",[Value2]),
+		 "~n   Value2: ~p", [_Value2]),
 	    loop_it_2(NOid, N+1);
 
 	#pdu{type         = 'get-response', 
@@ -5745,6 +5906,10 @@ loop_it_2(Oid, N) ->
 
     end.
 	    
+loop_mib_3_test() ->
+    ?DBG("loop_mib_3_test -> entry",[]),
+    loop_mib_2_test().
+
 
 %%%-----------------------------------------------------------------
 %%% Testing of reported bugs and other tickets.
@@ -6345,8 +6510,6 @@ otp_4394_config(AgentConfDir, MgrDir, Ip0) ->
     ?line write_notify_conf(AgentConfDir),
     ok.
     
-
-
 otp_4394_finish(Config) when is_list(Config) ->
     ?DBG("finish_otp_4394 -> entry", []),
     C1 = stop_agent(Config),
@@ -6469,7 +6632,6 @@ otp8395({init, Config}) when is_list(Config) ->
     %% 
 
     {ok, AgentNode}    = start_node(agent),
-    %% {ok, SubAgentNode} = start_node(sub_agent),
     {ok, ManagerNode}  = start_node(manager),
 
     %% -- 
@@ -6480,16 +6642,9 @@ otp8395({init, Config}) when is_list(Config) ->
     AgentMnesiaDir = join([AgentDbDir, "mnesia"]),
     mnesia_init(AgentNode, AgentMnesiaDir),
 
-    %% SubAgentDir = ?config(sub_agent_dir, Config),
-    %% SubAgentMnesiaDir = join([SubAgentDir, "mnesia"]),
-    %% mnesia_init(SubAgentNode, SubAgentMnesiaDir),
-
-    %% ok = mnesia_create_schema(AgentNode, [AgentNode, SubAgentNode]), 
-    %% ok = mnesia:create_schema([AgentNode, SubAgentNode]),
     mnesia_create_schema(AgentNode, [AgentNode]),
 
     mnesia_start(AgentNode),
-    %% mnesia_start(SubAgentNode),
 
     %% --
     %% Host & IP
@@ -6499,6 +6654,7 @@ otp8395({init, Config}) when is_list(Config) ->
     %% SubAgentHost = ?HPSTNAME(SubAgentNode), 
     ManagerHost  = ?HOSTNAME(ManagerNode),
 
+    IpFamily          = inet,
     Host              = snmp_test_lib:hostname(), 
     Ip                = ?LOCALHOST(),
     {ok, AgentIP0}    = snmp_misc:ip(AgentHost),
@@ -6516,9 +6672,7 @@ otp8395({init, Config}) when is_list(Config) ->
     Vsns           = [v1], 
     AgentConfDir   = ?config(agent_conf_dir, Config),
     ManagerConfDir = ?config(manager_top_dir, Config),
-    snmp_agent_test_lib:config(Vsns, 
-			       ManagerConfDir, AgentConfDir, 
-			       ManagerIP, AgentIP),
+    config(Vsns, ManagerConfDir, AgentConfDir, ManagerIP, AgentIP, IpFamily),
 
 
     %% --
@@ -6527,6 +6681,7 @@ otp8395({init, Config}) when is_list(Config) ->
 
     Config2 = start_agent([{host,          Host}, 
 			   {ip,            Ip}, 
+			   {ipfamily,      IpFamily},
 			   {agent_node,    AgentNode}, 
 			   {agent_host,    AgentHost}, 
 			   {agent_ip,      AgentIP}, 
@@ -6575,11 +6730,6 @@ otp8395({fin, Config}) when is_list(Config) ->
     ?DBG("otp8395(fin) -> stop agent node", []),
     stop_node(AgentNode),
 
-
-    %% SubAgentNode = ?config(sub_agent_node, Config),
-    %% stop_node(SubAgentNode),
-
-
     %% - 
     %% Stop the manager node
     %% 
@@ -6606,22 +6756,23 @@ otp8395(Config) when is_list(Config) ->
     put(mib_dir,  ?config(mib_dir, Config)),
     put(vsn, v1), 
     put(master_host, ?config(agent_host, Config)),
+    put(ipfamily, ?config(ipfamily, Config)),
     try_test(simple_standard_test),
 
     ?SLEEP(1000),
     AgentNode   = ?config(agent_node, Config),
     AgentLogDir = ?config(agent_log_dir, Config),
     OutFile     = join([AgentLogDir, "otp8395.txt"]),
-    {ok, LogInfo} = rpc:call(AgentNode, snmpa, log_info, []),
-    ?DBG("otp8395 -> LogInfo: ~p", [LogInfo]), 
+    {ok, _LogInfo} = rpc:call(AgentNode, snmpa, log_info, []),
+    ?DBG("otp8395 -> LogInfo: ~p", [_LogInfo]), 
 
     %% SyncRes = rpc:call(AgentNode, snmp, log_sync, [?audit_trail_log_name]),
     %% ?DBG("otp8395 -> SyncRes: ~p", [SyncRes]), 
 
     ok = agent_log_validation(AgentNode),
-    LTTRes = 
+    _LTTRes = 
 	rpc:call(AgentNode, snmpa, log_to_txt, [AgentLogDir, [], OutFile]), 
-    ?DBG("otp8395 -> LTTRes: ~p", [LTTRes]), 
+    ?DBG("otp8395 -> LTTRes: ~p", [_LTTRes]), 
 
     ?SLEEP(1000),
     ?DBG("otp8395 -> done", []),
@@ -6633,126 +6784,12 @@ otp8395(Config) when is_list(Config) ->
 otp9884({init, Config}) when is_list(Config) ->
     ?DBG("otp9884(init) -> entry with"
 	 "~n   Config: ~p", [Config]),
-
-    %% -- 
-    %% Start nodes
-    %% 
-
-    {ok, AgentNode}   = start_node(agent),
-
-    %% We don't use a manager in this test but the (common) config 
-    %% function takes an argument that is derived from this
-    {ok, ManagerNode} = start_node(manager), 
-
-    %% -- 
-    %% Mnesia init
-    %% 
-
-    AgentDbDir = ?config(agent_db_dir, Config),
-    AgentMnesiaDir = join([AgentDbDir, "mnesia"]),
-    mnesia_init(AgentNode, AgentMnesiaDir),
-
-    mnesia_create_schema(AgentNode, [AgentNode]),
-
-    mnesia_start(AgentNode),
-
-    %% --
-    %% Host & IP
-    %% 
-
-    AgentHost   = ?HOSTNAME(AgentNode),
-    ManagerHost = ?HOSTNAME(ManagerNode),
-
-    Host              = snmp_test_lib:hostname(), 
-    Ip                = ?LOCALHOST(),
-    {ok, AgentIP0}    = snmp_misc:ip(AgentHost),
-    AgentIP           = tuple_to_list(AgentIP0), 
-    {ok, ManagerIP0}  = snmp_misc:ip(ManagerHost),
-    ManagerIP         = tuple_to_list(ManagerIP0),
-
-
-    %% --
-    %% Write agent config
-    %% 
-
-    Vsns           = [v1], 
-    ManagerConfDir = ?config(manager_top_dir, Config),
-    AgentConfDir   = ?config(agent_conf_dir, Config),
-    AgentTopDir    = ?config(agent_top_dir, Config),
-    AgentBkpDir1   = join([AgentTopDir, backup1]),
-    AgentBkpDir2   = join([AgentTopDir, backup2]),
-    ok = file:make_dir(AgentBkpDir1),
-    ok = file:make_dir(AgentBkpDir2),
-    AgentBkpDirs = [AgentBkpDir1, AgentBkpDir2], 
-    snmp_agent_test_lib:config(Vsns, 
-			       ManagerConfDir, AgentConfDir, 
-			       ManagerIP, AgentIP),
-
-
-    %% --
-    %% Start the agent
-    %% 
-
-    Config2 = start_agent([{host,              Host}, 
-			   {ip,                Ip}, 
-			   {agent_node,        AgentNode}, 
-			   {agent_host,        AgentHost}, 
-			   {agent_ip,          AgentIP}, 
-			   {agent_backup_dirs, AgentBkpDirs}|Config]),
-
-    %% -- 
-    %% Create watchdog 
-    %% 
-
-    Dog = ?WD_START(?MINS(1)),
-
-    [{watchdog, Dog} | Config2];
+    init_v1_agent([{ipfamily, inet} | Config]);
 
 otp9884({fin, Config}) when is_list(Config) ->
     ?DBG("otp9884(fin) -> entry with"
 	 "~n   Config: ~p", [Config]),
-
-    AgentNode   = ?config(agent_node, Config),
-    ManagerNode = ?config(manager_node, Config),
-
-    %% -
-    %% Stop agent (this is the nice way to do it, 
-    %% so logs and files can be closed in the proper way).
-    %% 
-
-    AgentSup = ?config(agent_sup, Config),
-    ?DBG("otp9884(fin) -> stop (stand-alone) agent: ~p", [AgentSup]),
-    stop_stdalone_agent(AgentSup), 
-
-    %% - 
-    %% Stop mnesia
-    %% 
-    ?DBG("otp9884(fin) -> stop mnesia", []),
-    mnesia_stop(AgentNode),
-
-
-    %% - 
-    %% Stop the agent node
-    %% 
-
-    ?DBG("otp9884(fin) -> stop agent node", []),
-    stop_node(AgentNode),
-
-
-    %%     SubAgentNode = ?config(sub_agent_node, Config),
-    %%     stop_node(SubAgentNode),
-
-
-    %% - 
-    %% Stop the manager node
-    %% 
-
-    ?DBG("otp9884(fin) -> stop manager node", []),
-    stop_node(ManagerNode),
-
-    Dog = ?config(watchdog, Config),
-    ?WD_STOP(Dog),
-    lists:keydelete(watchdog, 1, Config);
+    fin_v1_agent(Config);
 
 otp9884(doc) ->
     "OTP-9884 - Simlutaneous backup call should not work. ";
@@ -6812,8 +6849,6 @@ otp9884_await_backup_completion(First, Second)
     end;
 otp9884_await_backup_completion(First, Second) ->
     throw({error, {bad_completion, First, Second}}).
-
-
 %%-----------------------------------------------------------------
 
 agent_log_validation(Node) ->
@@ -6911,20 +6946,6 @@ process_options(Defaults, _Opts) ->
     %% process_options(Defaults, Opts, []).
     Defaults.
 
-%% process_options([], _Opts, Acc) ->
-%%     lists:reverse(Acc);
-%% process_options([{Key, DefaultValue}|Defaults], Opts, Acc) ->
-%%     case lists:keysearch(Key, 1, Opts) of
-%% 	{value, {Key, Value}} when is_list->
-	    
-
-%% snmp_app_env_init(Node, Entity, Conf) ->
-%%     rpc:call(Node, snmp_app_env_init, [Entity, Conf]).
-
-%% snmp_app_env_init(Entity, Conf) ->
-%%     application:unload(snmp),
-%%     application:load(snmp),
-%%     application:set_env(snmp, Entity, Conf).
 
 start_stdalone_agent(Node, Config)  ->
     rpc:call(Node, ?MODULE, start_stdalone_agent, [Config]).
@@ -6942,10 +6963,10 @@ stop_stdalone_agent(Pid) when (node(Pid) =/= node()) ->
     MRef = erlang:monitor(process, Pid),
     rpc:call(node(Pid), ?MODULE, stop_stdalone_agent, [Pid]),
     receive
-	{'DOWN', MRef, process, Pid, Info} ->
+	{'DOWN', MRef, process, Pid, _Info} ->
 	    ?DBG("received expected DOWN message "
 		 "regarding snmp agent supervisor: "
-		 "~n   Info: ~p", [Info]),
+		 "~n   Info: ~p", [_Info]),
 	    ok
     after 5000 ->
 	    ?DBG("no DOWN message "
@@ -7004,9 +7025,6 @@ do_info(MaNode) ->
 			  tree_size_bytes, 
 			  db_memory]}], 
     verify_info(Info, Keys),
-    OldInfo = snmpa:old_info_format(Info),
-    ?DBG("info_test1 -> OldInfo: ~n~p", [OldInfo]),
-    verify_old_info(OldInfo),
     ok.
 
 verify_info([], []) ->
@@ -7047,21 +7065,6 @@ verify_subinfo(Info0, [Key|Keys]) ->
 	    {error, Key};
 	Info ->
 	    verify_subinfo(Info, Keys)
-    end.
-
-verify_old_info(Info) ->
-    Keys = [vsns, subagents, loaded_mibs, 
-	    tree_size_bytes, process_memory, db_memory],
-    verify_old_info(Keys, Info).
-
-verify_old_info([], _) ->
-    ok;
-verify_old_info([Key|Keys], Info) ->
-    case lists:keymember(Key, 1, Info) of
-	true ->
-	    verify_old_info(Keys, Info);
-	false ->
-	    ?FAIL({missing_old_info, Key})
     end.
    
 %% Index String - string used in index
@@ -7110,6 +7113,9 @@ delete_files(Config) ->
 config(Vsns, MgrDir, AgentDir, MIp, AIp) ->
     snmp_agent_test_lib:config(Vsns, MgrDir, AgentDir, MIp, AIp).
 
+config(Vsns, MgrDir, AgentDir, MIp, AIp, IpFamily) ->
+    snmp_agent_test_lib:config(Vsns, MgrDir, AgentDir, MIp, AIp, IpFamily).
+
 update_usm(Vsns, Dir) ->
     snmp_agent_test_lib:update_usm(Vsns, Dir).
     
@@ -7122,8 +7128,6 @@ rewrite_usm_mgr(Dir, ShaKey, DesKey) ->
 reset_usm_mgr(Dir) ->
     snmp_agent_test_lib:reset_usm_mgr(Dir).
 
-%% update_community(Vsns, Dir) ->
-%%     snmp_agent_test_lib:update_community(Vsns, Dir).
 
 update_vacm(Vsn, Dir) ->
     snmp_agent_test_lib:update_vacm(Vsn, Dir).
@@ -7134,8 +7138,6 @@ write_community_conf(Dir, Conf) ->
 write_target_addr_conf(Dir, Conf) ->
     snmp_agent_test_lib:write_target_addr_conf(Dir, Conf).
 
-%% write_target_addr_conf(Dir, ManagerIp, UDP, Vsns) -> 
-%%     snmp_agent_test_lib:write_target_addr_conf(Dir, ManagerIp, UDP, Vsns).
 
 rewrite_target_addr_conf(Dir, NewPort) ->
     snmp_agent_test_lib:rewrite_target_addr_conf(Dir, NewPort).
@@ -7155,10 +7157,6 @@ reset_target_params_conf(Dir) ->
 
 write_notify_conf(Dir) -> 
     snmp_agent_test_lib:write_notify_conf(Dir).
-
-%% write_view_conf(Dir) -> 
-%%     snmp_agent_test_lib:write_view_conf(Dir).
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -7319,9 +7317,6 @@ lists_key1search(Key, List) when is_atom(Key) ->
     end.
 
 
-%% regs() ->
-%%     lists:sort(registered()).
-
 %% ------
 
 join(Parts) ->
@@ -7354,3 +7349,124 @@ p(F, A) ->
 formated_timestamp() ->
     snmp_test_lib:formated_timestamp().
 
+
+init_v1_agent(Config) -> 
+    %% -- 
+    %% Start nodes
+    %% 
+
+    {ok, AgentNode}   = start_node(agent),
+
+    %% We don't use a manager in this test but the (common) config 
+    %% function takes an argument that is derived from this
+    {ok, ManagerNode} = start_node(manager), 
+
+    %% -- 
+    %% Mnesia init
+    %% 
+
+    AgentDbDir = ?config(agent_db_dir, Config),
+    AgentMnesiaDir = join([AgentDbDir, "mnesia"]),
+    mnesia_init(AgentNode, AgentMnesiaDir),
+
+    mnesia_create_schema(AgentNode, [AgentNode]),
+
+    mnesia_start(AgentNode),
+
+    %% --
+    %% Host & IP
+    %% 
+
+    AgentHost   = ?HOSTNAME(AgentNode),
+    ManagerHost = ?HOSTNAME(ManagerNode),
+
+    Host              = snmp_test_lib:hostname(), 
+    IpFamily          = config_ipfamily(Config),
+    Ip                = ?LOCALHOST(IpFamily),
+    {ok, AgentIP0}    = snmp_misc:ip(AgentHost, IpFamily),
+    AgentIP           = tuple_to_list(AgentIP0), 
+    {ok, ManagerIP0}  = snmp_misc:ip(ManagerHost, IpFamily),
+    ManagerIP         = tuple_to_list(ManagerIP0),
+
+
+    %% --
+    %% Write agent config
+    %% 
+
+    Vsns           = [v1], 
+    ManagerConfDir = ?config(manager_top_dir, Config),
+    AgentConfDir   = ?config(agent_conf_dir, Config),
+    AgentTopDir    = ?config(agent_top_dir, Config),
+    AgentBkpDir1   = join([AgentTopDir, backup1]),
+    AgentBkpDir2   = join([AgentTopDir, backup2]),
+    ok = file:make_dir(AgentBkpDir1),
+    ok = file:make_dir(AgentBkpDir2),
+    AgentBkpDirs = [AgentBkpDir1, AgentBkpDir2], 
+    config(Vsns, ManagerConfDir, AgentConfDir, ManagerIP, AgentIP, IpFamily),
+
+
+    %% --
+    %% Start the agent
+    %% 
+
+    Config2 = start_agent([{host,              Host}, 
+			   {ip,                Ip},
+			   {agent_node,        AgentNode}, 
+			   {agent_host,        AgentHost}, 
+			   {agent_ip,          AgentIP}, 
+			   {agent_backup_dirs, AgentBkpDirs}|Config]),
+
+    %% -- 
+    %% Create watchdog 
+    %% 
+
+    Dog = ?WD_START(?MINS(1)),
+
+    [{watchdog, Dog} | Config2].
+
+fin_v1_agent(Config) ->
+    AgentNode   = ?config(agent_node, Config),
+    ManagerNode = ?config(manager_node, Config),
+
+    %% -
+    %% Stop agent (this is the nice way to do it, 
+    %% so logs and files can be closed in the proper way).
+    %% 
+
+    AgentSup = ?config(agent_sup, Config),
+    stop_stdalone_agent(AgentSup), 
+
+    %% - 
+    %% Stop mnesia
+    %% 
+    mnesia_stop(AgentNode),
+
+
+    %% - 
+    %% Stop the agent node
+    %% 
+    stop_node(AgentNode),
+
+
+    %%     SubAgentNode = ?config(sub_agent_node, Config),
+    %%     stop_node(SubAgentNode),
+
+
+    %% - 
+    %% Stop the manager node
+    %% 
+    stop_node(ManagerNode),
+
+    Dog = ?config(watchdog, Config),
+    ?WD_STOP(Dog),
+    lists:keydelete(watchdog, 1, Config).
+
+
+
+config_ipfamily(Config) ->
+    case ?config(ipfamily, Config) of
+	undefined ->
+	    inet;
+	Value ->
+	    Value
+    end.

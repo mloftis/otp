@@ -2,16 +2,17 @@
 %% 
 %% Copyright Ericsson AB 2013. All Rights Reserved.
 %% 
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
-%% 
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %% 
 %% %CopyrightEnd%
 %%
@@ -27,30 +28,26 @@
 -behaviour(gen_server).
 
 %% API
--export([
-	report/0,
+-export([report/0,
 	from_file/1,
-	to_file/1
-    ]).
--export([
-	start/0, stop/0,
-	load_report/0, load_report/2,
-	applications/0, applications/1,
-	application/1, application/2,
-	environment/0, environment/1,
-	module/1, module/2,
-	modules/1
-    ]).
+	to_file/1]).
+
+-export([start/0, stop/0,
+         load_report/0, load_report/2,
+         applications/0, applications/1,
+         application/1, application/2,
+         environment/0, environment/1,
+         module/1, module/2,
+         modules/1,
+         sanity_check/0]).
 
 %% gen_server callbacks
--export([
-	init/1,
-	handle_call/3,
-	handle_cast/2,
-	handle_info/2,
-	terminate/2,
-	code_change/3
-    ]).
+-export([init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -68,14 +65,15 @@
 start() ->
     gen_server:start({local, ?SERVER}, ?MODULE, [], []).
 
+
 stop() ->
-    gen_server:call(?SERVER, stop).
+    gen_server:call(?SERVER, stop, infinity).
 
 load_report() -> load_report(data, report()).
 
 load_report(file, File)   -> load_report(data, from_file(File));
 load_report(data, Report) ->
-    start(), gen_server:call(?SERVER, {load_report, Report}).
+    ok = start_internal(), gen_server:call(?SERVER, {load_report, Report}, infinity).
 
 report() -> [
 	{init_arguments,    init:get_arguments()},
@@ -85,8 +83,13 @@ report() -> [
 	{erts_compile_info, erlang:system_info(compile_info)},
 	{beam_dynamic_libraries, get_dynamic_libraries()},
 	{environment_erts,  os_getenv_erts_specific()},
-	{environment,       [split_env(Env) || Env <- os:getenv()]}
+	{environment,       [split_env(Env) || Env <- os:getenv()]},
+	{sanity_check,      sanity_check()}	     
     ].
+
+-spec to_file(FileName) -> ok | {error, Reason} when
+      FileName :: file:name_all(),
+      Reason :: file:posix() | badarg | terminated | system_limit.
 
 to_file(File) ->
     file:write_file(File, iolist_to_binary([
@@ -113,22 +116,43 @@ from_file(File) ->
 
 applications() -> applications([]).
 applications(Opts) when is_list(Opts) ->
-    gen_server:call(?SERVER, {applications, Opts}).
+    gen_server:call(?SERVER, {applications, Opts}, infinity).
 
 application(App) when is_atom(App) -> application(App, []).
 application(App, Opts) when is_atom(App), is_list(Opts) ->
-    gen_server:call(?SERVER, {application, App, Opts}).
+    gen_server:call(?SERVER, {application, App, Opts}, infinity).
 
 environment() -> environment([]).
 environment(Opts) when is_list(Opts) ->
-    gen_server:call(?SERVER, {environment, Opts}).
+    gen_server:call(?SERVER, {environment, Opts}, infinity).
 
 module(M) when is_atom(M) -> module(M, []).
 module(M, Opts) when is_atom(M), is_list(Opts) ->
-    gen_server:call(?SERVER, {module, M, Opts}).
+    gen_server:call(?SERVER, {module, M, Opts}, infinity).
 
 modules(Opt) when is_atom(Opt) ->
-    gen_server:call(?SERVER, {modules, Opt}).
+    gen_server:call(?SERVER, {modules, Opt}, infinity).
+
+
+-spec sanity_check() -> ok | {failed, Failures} when
+      Application :: atom(),
+      ApplicationVersion :: string(),
+      MissingRuntimeDependencies :: {missing_runtime_dependencies,
+				     ApplicationVersion,
+				     [ApplicationVersion]},
+      InvalidApplicationVersion :: {invalid_application_version,
+				    ApplicationVersion},
+      InvalidAppFile :: {invalid_app_file, Application},
+      Failure :: MissingRuntimeDependencies
+	       | InvalidApplicationVersion
+	       | InvalidAppFile,
+      Failures :: [Failure].
+
+sanity_check() ->
+    case check_runtime_dependencies() of
+	[] -> ok;
+	Issues -> {failed, Issues}
+    end.
 
 %%===================================================================
 %% gen_server callbacks
@@ -196,6 +220,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%===================================================================
 %% Internal functions
 %%===================================================================
+
+start_internal() ->
+    case start() of
+        {ok,_} -> ok;
+        {error, {already_started,_}} -> ok;
+        Error -> Error
+    end.
 
 %% handle report values
 
@@ -280,7 +311,7 @@ print_environments([],_) ->
 
 print_environment({_Key, false},_) -> ok;
 print_environment({Key, Value},_) ->
-    io:format(" - ~s = ~s~n", [Key, Value]).
+    io:format(" - ~s = ~ts~n", [Key, Value]).
 
 print_modules_from_code(M, [Info|Ms], Opts) ->
     print_module_from_code(M, Info),
@@ -292,14 +323,14 @@ print_modules_from_code(_, [], _) ->
     ok.
 
 print_module_from_code(M, {Path, [{M,ModInfo}]}) ->
-    io:format(" from path \"~s\" (no application):~n", [Path]),
+    io:format(" from path \"~ts\" (no application):~n", [Path]),
     io:format("     - compiler: ~s~n", [get_value([compiler], ModInfo)]),
     io:format("     -      md5: ~s~n", [get_value([md5], ModInfo)]),
     io:format("     -   native: ~w~n", [get_value([native], ModInfo)]),
     io:format("     -   loaded: ~w~n", [get_value([loaded], ModInfo)]),
     ok;
 print_module_from_code(M, {App,Vsn,Path,[{M,ModInfo}]}) ->
-    io:format(" from path \"~s\" (~w-~s):~n", [Path,App,Vsn]),
+    io:format(" from path \"~ts\" (~w-~s):~n", [Path,App,Vsn]),
     io:format("     - compiler: ~s~n", [get_value([compiler], ModInfo)]),
     io:format("     -      md5: ~s~n", [get_value([md5], ModInfo)]),
     io:format("     -   native: ~w~n", [get_value([native], ModInfo)]),
@@ -344,6 +375,7 @@ erlang_system_info() ->
 	    logical_processors_online,
 	    logical_processors_available,
 	    driver_version,
+	    nif_version,
 	    emu_args,
 	    ethread_info,
 	    beam_jump_table,
@@ -457,6 +489,8 @@ get_application_from_path(Path) ->
 		    {description, proplists:get_value(description, Info, [])},
 		    {vsn,         proplists:get_value(vsn, Info, [])},
 		    {path,        Path},
+		    {runtime_dependencies,
+		     proplists:get_value(runtime_dependencies, Info, [])},
 		    {modules,     get_modules_from_path(Path)}
 		]}
     end.
@@ -547,8 +581,254 @@ get_beam_name() ->
 	false -> "";
 	true -> ".smp"
     end,
-    Beam = case os:getenv("EMU") of
-	false -> "beam";
-	Value -> Value
-    end,
+    Beam = os:getenv("EMU", "beam"),
     Beam ++ Type ++ Flavor.
+
+%% Check runtime dependencies...
+
+vsnstr2vsn(VsnStr) ->
+    list_to_tuple(lists:map(fun (Part) ->
+				    list_to_integer(Part)
+			    end,
+			    string:tokens(VsnStr, "."))).
+
+rtdepstrs2rtdeps([]) ->
+    [];
+rtdepstrs2rtdeps([RTDep | RTDeps]) ->
+    [AppStr, VsnStr] = string:tokens(RTDep, "-"),
+    [{list_to_atom(AppStr), vsnstr2vsn(VsnStr)} | rtdepstrs2rtdeps(RTDeps)].
+
+build_app_table([], AppTab) ->
+    AppTab;
+build_app_table([App | Apps], AppTab0) ->
+    AppTab1 = try
+		  %% We may have multiple application versions installed
+		  %% of the same application! It is therefore important
+		  %% to look up the application version that actually will
+		  %% be used via code server.
+		  AppFile = code:where_is_file(atom_to_list(App) ++ ".app"),
+		  {ok, [{application, App, Info}]} = file:consult(AppFile),
+		  VsnStr = proplists:get_value(vsn, Info),
+		  Vsn = vsnstr2vsn(VsnStr),
+		  RTDepStrs = proplists:get_value(runtime_dependencies,
+						  Info, []),
+		  RTDeps = rtdepstrs2rtdeps(RTDepStrs),
+		  gb_trees:insert(App, {Vsn, RTDeps}, AppTab0)
+	      catch
+		  _ : _ ->
+		      AppTab0
+	      end,
+    build_app_table(Apps, AppTab1).
+
+meets_min_req(Vsn, Vsn) ->
+    true;
+meets_min_req({X}, VsnReq) ->
+    meets_min_req({X, 0, 0}, VsnReq);
+meets_min_req({X, Y}, VsnReq) ->
+    meets_min_req({X, Y, 0}, VsnReq);
+meets_min_req(Vsn, {X}) ->
+    meets_min_req(Vsn, {X, 0, 0});
+meets_min_req(Vsn, {X, Y}) ->
+    meets_min_req(Vsn, {X, Y, 0});
+meets_min_req({X, _Y, _Z}, {XReq, _YReq, _ZReq}) when X > XReq ->
+    true;
+meets_min_req({X, Y, _Z}, {X, YReq, _ZReq}) when Y > YReq ->
+    true;
+meets_min_req({X, Y, Z}, {X, Y, ZReq}) when Z > ZReq ->
+    true;
+meets_min_req({_X, _Y, _Z}, {_XReq, _YReq, _ZReq}) ->
+    false;
+meets_min_req(Vsn, VsnReq) ->
+    gp_meets_min_req(mk_gp_vsn_list(Vsn), mk_gp_vsn_list(VsnReq)).
+
+gp_meets_min_req([X, Y, Z | _Vs], [X, Y, Z]) ->
+    true;
+gp_meets_min_req([X, Y, Z | _Vs], [XReq, YReq, ZReq]) ->
+    meets_min_req({X, Y, Z}, {XReq, YReq, ZReq});
+gp_meets_min_req([X, Y, Z | Vs], [X, Y, Z | VReqs]) ->
+    gp_meets_min_req_tail(Vs, VReqs);
+gp_meets_min_req(_Vsn, _VReq) ->
+    %% Versions on different version branches, i.e., the minimum
+    %% required functionality is not included in Vsn.
+    false.
+
+gp_meets_min_req_tail([V | Vs], [V | VReqs]) ->
+    gp_meets_min_req_tail(Vs, VReqs);
+gp_meets_min_req_tail([], []) ->
+    true;
+gp_meets_min_req_tail([_V | _Vs], []) ->
+    true;
+gp_meets_min_req_tail([V | _Vs], [VReq]) when V > VReq ->
+    true;
+gp_meets_min_req_tail(_Vs, _VReqs) ->
+    %% Versions on different version branches, i.e., the minimum
+    %% required functionality is not included in Vsn.
+    false.
+
+mk_gp_vsn_list(Vsn) ->
+    [X, Y, Z | Tail] = tuple_to_list(Vsn),
+    [X, Y, Z | remove_trailing_zeroes(Tail)].
+
+remove_trailing_zeroes([]) ->
+    [];
+remove_trailing_zeroes([0 | Vs]) ->
+    case remove_trailing_zeroes(Vs) of
+	[] -> [];
+	NewVs -> [0 | NewVs]
+    end;
+remove_trailing_zeroes([V | Vs]) ->
+    [V | remove_trailing_zeroes(Vs)].
+
+mk_app_vsn_str({App, Vsn}) ->
+    mk_app_vsn_str(App, Vsn).
+
+mk_app_vsn_str(App, Vsn) ->
+    VsnList = tuple_to_list(Vsn),
+    lists:flatten([atom_to_list(App),
+		   $-,
+		   integer_to_list(hd(VsnList)),
+		   lists:map(fun (Part) ->
+				     [$., integer_to_list(Part)]
+			     end, tl(VsnList))]).
+
+otp_17_0_vsns_orddict() ->
+    [{asn1,{3,0}},
+     {common_test,{1,8}},
+     {compiler,{5,0}},
+     {cosEvent,{2,1,15}},
+     {cosEventDomain,{1,1,14}},
+     {cosFileTransfer,{1,1,16}},
+     {cosNotification,{1,1,21}},
+     {cosProperty,{1,1,17}},
+     {cosTime,{1,1,14}},
+     {cosTransactions,{1,2,14}},
+     {crypto,{3,3}},
+     {debugger,{4,0}},
+     {dialyzer,{2,7}},
+     {diameter,{1,6}},
+     {edoc,{0,7,13}},
+     {eldap,{1,0,3}},
+     {erl_docgen,{0,3,5}},
+     {erl_interface,{3,7,16}},
+     {erts,{6,0}},
+     {et,{1,5}},
+     {eunit,{2,2,7}},
+     {gs,{1,5,16}},
+     {hipe,{3,10,3}},
+     {ic,{4,3,5}},
+     {inets,{5,10}},
+     {jinterface,{1,5,9}},
+     {kernel,{3,0}},
+     {megaco,{3,17,1}},
+     {mnesia,{4,12}},
+     {observer,{2,0}},
+     {odbc,{2,10,20}},
+     {orber,{3,6,27}},
+     {os_mon,{2,2,15}},
+     {ose,{1,0}},
+     {otp_mibs,{1,0,9}},
+     {parsetools,{2,0,11}},
+     {percept,{0,8,9}},
+     {public_key,{0,22}},
+     {reltool,{0,6,5}},
+     {runtime_tools,{1,8,14}},
+     {sasl,{2,4}},
+     {snmp,{4,25,1}},
+     {ssh,{3,0,1}},
+     {ssl,{5,3,4}},
+     {stdlib,{2,0}},
+     {syntax_tools,{1,6,14}},
+     {test_server,{3,7}},
+     {tools,{2,6,14}},
+     {typer,{0,9,6}},
+     {webtool,{0,8,10}},
+     {wx,{1,2}},
+     {xmerl,{1,3,7}}].
+
+otp_17_0_vsns_tab() ->
+    gb_trees:from_orddict(otp_17_0_vsns_orddict()).
+
+check_runtime_dependency({App, DepVsn}, AppTab) ->
+    case gb_trees:lookup(App, AppTab) of
+	none ->
+	    false;
+	{value, {Vsn, _}} ->
+	    meets_min_req(Vsn, DepVsn)
+    end.
+
+check_runtime_dependencies(App, AppTab, OtpMinVsnTab) ->
+    case gb_trees:lookup(App, AppTab) of
+	none ->
+	    [{invalid_app_file, App}];
+	{value, {Vsn, RTDeps}} ->
+	    RTD = case lists:foldl(
+			 fun (RTDep, Acc) ->
+				 case check_runtime_dependency(RTDep, AppTab) of
+				     true ->
+					 Acc;
+				     false ->
+					 [mk_app_vsn_str(RTDep) | Acc]
+				 end
+			 end,
+			 [],
+			 RTDeps) of
+		      [] ->
+			  [];
+		      MissingDeps ->
+			  [{missing_runtime_dependencies,
+			    mk_app_vsn_str(App, Vsn),
+			    MissingDeps}]
+		  end,
+	    case gb_trees:lookup(App, OtpMinVsnTab) of
+		none ->
+		    RTD;
+		{value, MinVsn} ->
+		    case meets_min_req(Vsn, MinVsn) of
+			true ->
+			    RTD;
+			false ->
+			    [{invalid_application_version,
+			      mk_app_vsn_str(App, Vsn)} | RTD]
+		    end
+	    end
+    end.
+
+app_file_to_app(AF) ->
+    list_to_atom(filename:basename(AF, ".app")).
+
+get_apps() ->
+    get_apps(code:get_path(), []).
+
+get_apps([], Apps) ->
+    lists:usort(Apps);
+get_apps([Path|Paths], Apps) ->
+    case filelib:wildcard(filename:join(Path, "*.app")) of
+	[] ->
+	    %% Not app or invalid app
+	    get_apps(Paths, Apps);
+	[AppFile] ->
+	    get_apps(Paths, [app_file_to_app(AppFile) | Apps]);
+	[_AppFile| _] = AppFiles ->
+	    %% Strange with multple .app files... Lets put them
+	    %% all in the list and see what we get...
+	    lists:map(fun (AF) ->
+			      app_file_to_app(AF)
+		      end, AppFiles) ++ Apps
+    end.
+
+check_runtime_dependencies() ->
+    OtpMinVsnTab = otp_17_0_vsns_tab(),
+    Apps = get_apps(),
+    AppTab = build_app_table(Apps, gb_trees:empty()),
+    lists:foldl(fun (App, Acc) ->
+			case check_runtime_dependencies(App,
+							AppTab,
+							OtpMinVsnTab) of
+			    [] -> Acc;
+			    Issues -> Issues ++ Acc
+			end
+		end,
+		[],
+		Apps).
+
+%% End of runtime dependency checks

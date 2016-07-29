@@ -1,18 +1,19 @@
 /*
  * %CopyrightBegin%
  *
- * Copyright Ericsson AB 1996-2013. All Rights Reserved.
+ * Copyright Ericsson AB 1996-2016. All Rights Reserved.
  *
- * The contents of this file are subject to the Erlang Public License,
- * Version 1.1, (the "License"); you may not use this file except in
- * compliance with the License. You should have received a copy of the
- * Erlang Public License along with this software. If not, it can be
- * retrieved online at http://www.erlang.org/.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * Software distributed under the License is distributed on an "AS IS"
- * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
- * the License for the specific language governing rights and limitations
- * under the License.
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  * %CopyrightEnd%
  */
@@ -99,6 +100,9 @@
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
+
+#include <ctype.h>
+#include <sys/types.h>
 #include <stdlib.h>
 
 /* Need (NON)BLOCKING macros for sendfile */
@@ -111,13 +115,9 @@
 #include "erl_driver.h"
 #include "erl_efile.h"
 #include "erl_threads.h"
-#include "zlib.h"
 #include "gzio.h"
 #include "dtrace-wrapper.h" 
-#include <ctype.h>
-#include <sys/types.h>
 
-void erl_exit(int n, char *fmt, ...);
 
 static ErlDrvSysInfo sys_info;
 
@@ -168,7 +168,7 @@ dt_private *get_dt_private(int);
 
 
 #ifdef USE_THREADS
-#define IF_THRDS if (sys_info.async_threads > 0)
+#define THRDS_AVAILABLE (sys_info.async_threads > 0)
 #ifdef HARDDEBUG /* HARDDEBUG in io.c is expected too */
 #define TRACE_DRIVER fprintf(stderr, "Efile: ")
 #else
@@ -178,24 +178,26 @@ dt_private *get_dt_private(int);
 #define MUTEX_LOCK(m)    do { IF_THRDS { TRACE_DRIVER; driver_pdl_lock(m);   } } while (0)
 #define MUTEX_UNLOCK(m)  do { IF_THRDS { TRACE_DRIVER; driver_pdl_unlock(m); } } while (0)
 #else
-#define IF_THRDS if (0)
+#define THRDS_AVAILABLE (0)
 #define MUTEX_INIT(m, p)
 #define MUTEX_LOCK(m)
 #define MUTEX_UNLOCK(m)
 #endif
+#define IF_THRDS if (THRDS_AVAILABLE)
 
 
+#define SENDFILE_FLGS_USE_THREADS (1 << 0)
 /**
  * On DARWIN sendfile can deadlock with close if called in
  * different threads. So until Apple fixes so that sendfile
  * is not buggy we disable usage of the async pool for
  * DARWIN. The testcase t_sendfile_crashduring reproduces
- * this error when using +A 10.
+ * this error when using +A 10 and enabling SENDFILE_FLGS_USE_THREADS.
  */
 #if defined(__APPLE__) && defined(__MACH__)
-#define USE_THRDS_FOR_SENDFILE 0
+#define USE_THRDS_FOR_SENDFILE(DATA) 0
 #else
-#define USE_THRDS_FOR_SENDFILE (sys_info.async_threads > 0)
+#define USE_THRDS_FOR_SENDFILE(DATA) (DATA->flags & SENDFILE_FLGS_USE_THREADS)
 #endif /* defined(__APPLE__) && defined(__MACH__) */
 
 
@@ -255,23 +257,6 @@ dt_private *get_dt_private(int);
 
 
 
-#define GET_TIME(i, b) \
-    (i).year  = get_int32((b) + 0 * 4); \
-    (i).month = get_int32((b) + 1 * 4); \
-    (i).day   = get_int32((b) + 2 * 4); \
-    (i).hour  = get_int32((b) + 3 * 4); \
-    (i).minute = get_int32((b) + 4 * 4); \
-    (i).second = get_int32((b) + 5 * 4)
-
-#define PUT_TIME(i, b) \
-  put_int32((i).year,  (b) + 0 * 4); \
-  put_int32((i).month, (b) + 1 * 4); \
-  put_int32((i).day,   (b) + 2 * 4); \
-  put_int32((i).hour,  (b) + 3 * 4); \
-  put_int32((i).minute,(b) + 4 * 4); \
-  put_int32((i).second,(b) + 5 * 4)
-
-
 #if ALWAYS_READ_LINE_AHEAD
 #define DEFAULT_LINEBUF_SIZE 2048
 #else
@@ -301,7 +286,7 @@ static void file_stop_select(ErlDrvEvent event, void* _);
 enum e_timer {timer_idle, timer_again, timer_write};
 #ifdef HAVE_SENDFILE
 enum e_sendfile {sending, not_sending};
-static void free_sendfile(void *data);
+#define SENDFILE_USE_THREADS (1 << 0)
 #endif /* HAVE_SENDFILE */
 
 struct t_data;
@@ -522,20 +507,9 @@ struct t_data
 static void *ef_safe_alloc(Uint s)
 {
     void *p = EF_ALLOC(s);
-    if (!p) erl_exit(1, "efile drv: Can't allocate %lu bytes of memory\n", (unsigned long)s);
+    if (!p) erts_exit(ERTS_ERROR_EXIT, "efile drv: Can't allocate %lu bytes of memory\n", (unsigned long)s);
     return p;
 }
-
-#if 0 /* Currently not used */
-
-static void *ef_safe_realloc(void *op, Uint s)
-{
-    void *p = EF_REALLOC(op, s);
-    if (!p) erl_exit(1, "efile drv: Can't reallocate %lu bytes of memory\n", (unsigned long)s);
-    return p;
-}
-
-#endif
 
 /*********************************************************************
  * ErlIOVec manipulation functions.
@@ -764,6 +738,9 @@ file_init(void)
 			    : 0);
     driver_system_info(&sys_info, sizeof(ErlDrvSysInfo));
 
+    /* run initiation of efile_driver if needed */
+    efile_init();
+
 #ifdef  USE_VM_PROBES
     erts_mtx_init(&dt_driver_mutex, "efile_drv dtrace mutex");
     pthread_key_create(&dt_driver_key, NULL);
@@ -818,7 +795,7 @@ file_start(ErlDrvPort port, char* command)
 
 static void do_close(int flags, SWord fd) {
     if (flags & EFILE_COMPRESSED) {
-	erts_gzclose((gzFile)(fd));
+	erts_gzclose((ErtsGzFile)(fd));
     } else {
 	efile_closefile((int) fd);
     }
@@ -899,7 +876,7 @@ static void reply_Uint_posix_error(file_descriptor *desc, Uint num,
     TRACE_C('N');
 
     response[0] = FILE_RESP_NUMERR;
-#if SIZEOF_VOID_P == 4 || HALFWORD_HEAP
+#if SIZEOF_VOID_P == 4
     put_int32(0, response+1);
 #else
     put_int32(num>>32, response+1);
@@ -910,6 +887,7 @@ static void reply_Uint_posix_error(file_descriptor *desc, Uint num,
     driver_output2(desc->port, response, t-response, NULL, 0);
 }
 
+#ifdef HAVE_SENDFILE
 static void reply_string_error(file_descriptor *desc, char* str) {
     char response[256];		/* Response buffer. */
     char* s;
@@ -920,6 +898,7 @@ static void reply_string_error(file_descriptor *desc, char* str) {
 	*t = tolower(*s);
     driver_output2(desc->port, response, t-response, NULL, 0);
 }
+#endif
 
 static int reply_error(file_descriptor *desc, 
 		       Efile_error *errInfo) /* The error codes. */
@@ -966,7 +945,7 @@ static int reply_Uint(file_descriptor *desc, Uint result) {
     TRACE_C('R');
 
     tmp[0] = FILE_RESP_NUMBER;
-#if SIZEOF_VOID_P == 4 || HALFWORD_HEAP
+#if SIZEOF_VOID_P == 4
     put_int32(0, tmp+1);
 #else
     put_int32(result>>32, tmp+1);
@@ -1136,7 +1115,7 @@ static void invoke_read(void *data)
     }
     read_size = size;
     if (d->flags & EFILE_COMPRESSED) {
-	read_size = erts_gzread((gzFile)d->fd, 
+	read_size = erts_gzread((ErtsGzFile)d->fd,
 				d->c.read.binp->orig_bytes + d->c.read.bin_offset,
 				size);
 	status = (read_size != (size_t) -1);
@@ -1209,7 +1188,7 @@ static void invoke_read_line(void *data)
 	    size = need - d->c.read_line.read_size;
 	}
 	if (d->flags & EFILE_COMPRESSED) {
-	    read_size = erts_gzread((gzFile)d->fd, 
+	    read_size = erts_gzread((ErtsGzFile)d->fd,
 				    d->c.read_line.binp->orig_bytes + 
 				    d->c.read_line.read_offset + d->c.read_line.read_size,
 				    size);
@@ -1250,7 +1229,7 @@ static void invoke_read_line(void *data)
 		    d->c.read_line.read_size -= too_much;
 		    ASSERT(d->c.read_line.read_size >= 0);
 		    if (d->flags & EFILE_COMPRESSED) {
-			Sint64 location = erts_gzseek((gzFile)d->fd, 
+			Sint64 location = erts_gzseek((ErtsGzFile)d->fd,
 						      -((Sint64) too_much), EFILE_SEEK_CUR);
 			if (location == -1) {
 			    d->result_ok = 0;
@@ -1534,10 +1513,10 @@ static void invoke_writev(void *data) {
 		     * with errno.
 		     */
 		    errno = EINVAL; 
-		    if (! (status = 
-			   erts_gzwrite((gzFile)d->fd, 
-					iov[i].iov_base,
-					iov[i].iov_len)) == iov[i].iov_len) {
+		    status = erts_gzwrite((ErtsGzFile)d->fd,
+					  iov[i].iov_base,
+					  iov[i].iov_len) == iov[i].iov_len;
+		    if (! status) {
 			d->errInfo.posix_errno =
 			    d->errInfo.os_errno = errno; /* XXX Correct? */
 			break;
@@ -1619,12 +1598,12 @@ static void invoke_altname(void *data)
 }
 
 static void invoke_pwritev(void *data) {
-    struct t_data    *d = (struct t_data *) data;
+    struct t_data* const d = (struct t_data *) data;
+    struct t_pwritev * const c = &d->c.pwritev;
     SysIOVec         *iov0;
     SysIOVec         *iov;
     int               iovlen;
     int               iovcnt;
-    struct t_pwritev *c = &d->c.pwritev;
     size_t            p;
     int               segment;
     size_t            size, write_size, written;
@@ -1698,9 +1677,9 @@ static void invoke_pwritev(void *data) {
 	    d->result_ok = 0;
 	    d->again = 0;
 	deq_error:
-	    MUTEX_LOCK(d->c.writev.q_mtx);
-	    driver_deq(d->c.pwritev.port, c->size);
-	    MUTEX_UNLOCK(d->c.writev.q_mtx);
+	    MUTEX_LOCK(c->q_mtx);
+	    driver_deq(c->port, c->size);
+	    MUTEX_UNLOCK(c->q_mtx);
 
 	    goto done;
 	} else {
@@ -1711,9 +1690,9 @@ static void invoke_pwritev(void *data) {
       ASSERT(written >= FILE_SEGMENT_WRITE);
     }
       
-    MUTEX_LOCK(d->c.writev.q_mtx);
-    driver_deq(d->c.pwritev.port, written);
-    MUTEX_UNLOCK(d->c.writev.q_mtx);
+    MUTEX_LOCK(c->q_mtx);
+    driver_deq(c->port, written);
+    MUTEX_UNLOCK(c->q_mtx);
  done:
     EF_FREE(iov); /* Free our copy of the vector, nothing to restore */
     
@@ -1797,7 +1776,7 @@ static void invoke_lseek(void *data)
 	    d->errInfo.posix_errno = EINVAL;
 	    status = 0;
 	} else {
-	    d->c.lseek.location = erts_gzseek((gzFile)d->fd, 
+	    d->c.lseek.location = erts_gzseek((ErtsGzFile)d->fd,
 					      offset, d->c.lseek.origin);
 	    if (d->c.lseek.location == -1) {
 		d->errInfo.posix_errno = errno;
@@ -1885,7 +1864,7 @@ static void invoke_open(void *data)
 	    if (status || (d->errInfo.posix_errno != EISDIR)) {
 		mode = (d->flags & EFILE_MODE_READ) ? "rb" : "wb";
 		d->fd = (SWord) erts_gzopen(d->b, mode);
-		if ((gzFile)d->fd) {
+		if ((ErtsGzFile)d->fd) {
 		    status = 1;
 		} else {
 		    if (errno == 0) {
@@ -1933,7 +1912,7 @@ static void invoke_sendfile(void *data)
 
     d->c.sendfile.written += nbytes;
 
- if (result == 1 || (result == 0 && USE_THRDS_FOR_SENDFILE)) {
+    if (result == 1 || (result == 0 && USE_THRDS_FOR_SENDFILE(d))) {
       d->result_ok = 0;
     } else if (result == 0 && (d->errInfo.posix_errno == EAGAIN
 				 || d->errInfo.posix_errno == EINTR)) {
@@ -1941,6 +1920,8 @@ static void invoke_sendfile(void *data)
 	d->result_ok = 1;
 	if (d->c.sendfile.nbytes != 0)
 	  d->c.sendfile.nbytes -= nbytes;
+      } else if (nbytes == 0 && d->c.sendfile.nbytes == 0) {
+	d->result_ok = 1;
       } else
 	d->result_ok = 0;
     } else {
@@ -1950,7 +1931,7 @@ static void invoke_sendfile(void *data)
 
 static void free_sendfile(void *data) {
     struct t_data *d = (struct t_data *)data;
-    if (USE_THRDS_FOR_SENDFILE) {
+    if (USE_THRDS_FOR_SENDFILE(d)) {
 	SET_NONBLOCKING(d->c.sendfile.out_fd);
     } else {
 	MUTEX_LOCK(d->c.sendfile.q_mtx);
@@ -2581,7 +2562,6 @@ file_async_ready(ErlDrvData e, ErlDrvThreadData data)
       case FILE_CLOSE_ON_PORT_EXIT:
 	  /* See file_stop. However this is never invoked after the port is killed. */
 	  free_data(data);
-	  EF_FREE(desc);
 	  desc = NULL;
 	  /* This is it for this port, so just send dtrace and return, avoid doing anything to the freed data */
 	  DTRACE6(efile_drv_return, sched_i1, sched_i2, sched_utag,
@@ -2920,12 +2900,12 @@ file_output(ErlDrvData e, char* buf, ErlDrvSizeT count)
 	    d = EF_SAFE_ALLOC(sizeof(struct t_data) - 1
 			      + FILENAME_BYTELEN(buf + 9*4) + FILENAME_CHARSIZE);
 	    
-	    d->info.mode       = get_int32(buf +  0 * 4);
-	    d->info.uid        = get_int32(buf +  1 * 4);
-	    d->info.gid        = get_int32(buf +  2 * 4);
-	    d->info.accessTime = (time_t)((Sint64)get_int64(buf +  3 * 4));
-	    d->info.modifyTime = (time_t)((Sint64)get_int64(buf +  5 * 4));
-	    d->info.cTime      = (time_t)((Sint64)get_int64(buf +  7 * 4));
+	    d->info.mode       = get_int32(buf + 0 * 4);
+	    d->info.uid        = get_int32(buf + 1 * 4);
+	    d->info.gid        = get_int32(buf + 2 * 4);
+	    d->info.accessTime = get_int64(buf + 3 * 4);
+	    d->info.modifyTime = get_int64(buf + 5 * 4);
+	    d->info.cTime      = get_int64(buf + 7 * 4);
 
 	    FILENAME_COPY(d->b, buf + 9*4);
 #ifdef USE_VM_PROBES
@@ -4123,8 +4103,16 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	    goto done;
 	}
 
-	if (hd_len != 0 || tl_len != 0 || flags != 0) {
-	    /* We do not allow header, trailers and/or flags right now */
+	if (hd_len != 0 || tl_len != 0) {
+	    /* We do not allow header, trailers */
+	    reply_posix_error(desc, EINVAL);
+	    goto done;
+	}
+
+	
+	if (flags & SENDFILE_FLGS_USE_THREADS && !THRDS_AVAILABLE) {
+	    /* We do not allow use_threads flag on a system where
+	       no threads are available. */
 	    reply_posix_error(desc, EINVAL);
 	    goto done;
 	}
@@ -4134,6 +4122,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 	d->command = command;
 	d->invoke = invoke_sendfile;
 	d->free = free_sendfile;
+	d->flags = flags;
 	d->level = 2;
 
 	d->c.sendfile.out_fd = (int) out_fd;
@@ -4153,7 +4142,7 @@ file_outputv(ErlDrvData e, ErlIOVec *ev) {
 
 	d->c.sendfile.nbytes = nbytes;
 
-	if (USE_THRDS_FOR_SENDFILE) {
+	if (USE_THRDS_FOR_SENDFILE(d)) {
 	    SET_BLOCKING(d->c.sendfile.out_fd);
 	} else {
 	    /**

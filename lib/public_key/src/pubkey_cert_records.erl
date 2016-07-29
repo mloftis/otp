@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2008-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2008-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -99,7 +100,7 @@ transform(Other,_) ->
     Other.
 
 %%--------------------------------------------------------------------
--spec supportedPublicKeyAlgorithms(Oid::tuple()) -> asn1_type().
+-spec supportedPublicKeyAlgorithms(Oid::tuple()) -> public_key:asn1_type().
 %%
 %% Description: Returns the public key type for an algorithm
 %% identifier tuple as found in SubjectPublicKeyInfo.
@@ -147,6 +148,20 @@ namedCurves(?'sect163r1') -> sect163r1;
 namedCurves(?'sect163k1') -> sect163k1;
 namedCurves(?'secp256r1') -> secp256r1;
 namedCurves(?'secp192r1') -> secp192r1;
+namedCurves(?'brainpoolP160r1') -> brainpoolP160r1;
+namedCurves(?'brainpoolP160t1') -> brainpoolP160t1;
+namedCurves(?'brainpoolP192r1') -> brainpoolP192r1;
+namedCurves(?'brainpoolP192t1') -> brainpoolP192t1;
+namedCurves(?'brainpoolP224r1') -> brainpoolP224r1;
+namedCurves(?'brainpoolP224t1') -> brainpoolP224t1;
+namedCurves(?'brainpoolP256r1') -> brainpoolP256r1;
+namedCurves(?'brainpoolP256t1') -> brainpoolP256t1;
+namedCurves(?'brainpoolP320r1') -> brainpoolP320r1;
+namedCurves(?'brainpoolP320t1') -> brainpoolP320t1;
+namedCurves(?'brainpoolP384r1') -> brainpoolP384r1;
+namedCurves(?'brainpoolP384t1') -> brainpoolP384t1;
+namedCurves(?'brainpoolP512r1') -> brainpoolP512r1;
+namedCurves(?'brainpoolP512t1') -> brainpoolP512t1;
 
 namedCurves(sect571r1) -> ?'sect571r1';
 namedCurves(sect571k1) -> ?'sect571k1';
@@ -180,7 +195,21 @@ namedCurves(sect239k1) -> ?'sect239k1';
 namedCurves(sect163r1) -> ?'sect163r1';
 namedCurves(sect163k1) -> ?'sect163k1';
 namedCurves(secp256r1) -> ?'secp256r1';
-namedCurves(secp192r1) -> ?'secp192r1'.
+namedCurves(secp192r1) -> ?'secp192r1';
+namedCurves(brainpoolP160r1) -> ?'brainpoolP160r1';
+namedCurves(brainpoolP160t1) -> ?'brainpoolP160t1';
+namedCurves(brainpoolP192r1) -> ?'brainpoolP192r1';
+namedCurves(brainpoolP192t1) -> ?'brainpoolP192t1';
+namedCurves(brainpoolP224r1) -> ?'brainpoolP224r1';
+namedCurves(brainpoolP224t1) -> ?'brainpoolP224t1';
+namedCurves(brainpoolP256r1) -> ?'brainpoolP256r1';
+namedCurves(brainpoolP256t1) -> ?'brainpoolP256t1';
+namedCurves(brainpoolP320r1) -> ?'brainpoolP320r1';
+namedCurves(brainpoolP320t1) -> ?'brainpoolP320t1';
+namedCurves(brainpoolP384r1) -> ?'brainpoolP384r1';
+namedCurves(brainpoolP384t1) -> ?'brainpoolP384t1';
+namedCurves(brainpoolP512r1) -> ?'brainpoolP512r1';
+namedCurves(brainpoolP512t1) -> ?'brainpoolP512t1'.
 
 %%--------------------------------------------------------------------
 %%% Internal functions
@@ -189,8 +218,8 @@ namedCurves(secp192r1) -> ?'secp192r1'.
 %%% SubjectPublicKey
 
 decode_supportedPublicKey(#'OTPSubjectPublicKeyInfo'{algorithm= PA =
-						  #'PublicKeyAlgorithm'{algorithm=Algo},
-						  subjectPublicKey = {0,SPK0}}) ->
+							 #'PublicKeyAlgorithm'{algorithm=Algo},
+						     subjectPublicKey = SPK0}) ->
     Type = supportedPublicKeyAlgorithms(Algo),
     SPK = case Type of
               'ECPoint' -> #'ECPoint'{point = SPK0};
@@ -210,7 +239,7 @@ encode_supportedPublicKey(#'OTPSubjectPublicKeyInfo'{algorithm= PA =
                   {ok, SPK1} = 'OTP-PUB-KEY':encode(Type, SPK0),
                   SPK1
           end,
-    #'OTPSubjectPublicKeyInfo'{subjectPublicKey = {0,SPK}, algorithm=PA}.
+    #'OTPSubjectPublicKeyInfo'{subjectPublicKey = SPK, algorithm=PA}.
 
 %%% Extensions
 

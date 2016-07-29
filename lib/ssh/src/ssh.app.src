@@ -18,12 +18,13 @@
 	     ssh_connection_handler,
 	     ssh_connection_sup,
 	     ssh_daemon_channel,
+	     ssh_dbg,
 	     ssh_shell,
 	     sshc_sup,
 	     sshd_sup,
 	     ssh_file,
 	     ssh_io,
-	     ssh_math,
+	     ssh_info,
 	     ssh_no_io,
              ssh_server_key_api,
 	     ssh_sftp,
@@ -38,6 +39,13 @@
   {registered, []},
   {applications, [kernel, stdlib, crypto, public_key]},
   {env, []},
-  {mod, {ssh_app, []}}]}.
+  {mod, {ssh_app, []}},
+  {runtime_dependencies, [
+			  "crypto-3.3",
+			  "erts-6.0",
+			  "kernel-3.0",
+			  "public_key-1.1",
+			  "stdlib-3.0"
+			 ]}]}.
 
 

@@ -1,18 +1,19 @@
 /*
  * %CopyrightBegin%
  * 
- * Copyright Ericsson AB 1996-2013. All Rights Reserved.
+ * Copyright Ericsson AB 1996-2015. All Rights Reserved.
  * 
- * The contents of this file are subject to the Erlang Public License,
- * Version 1.1, (the "License"); you may not use this file except in
- * compliance with the License. You should have received a copy of the
- * Erlang Public License along with this software. If not, it can be
- * retrieved online at http://www.erlang.org/.
- * 
- * Software distributed under the License is distributed on an "AS IS"
- * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
- * the License for the specific language governing rights and limitations
- * under the License.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  * 
  * %CopyrightEnd%
  */
@@ -41,7 +42,14 @@
 #  include "config.h"
 #endif
 #ifdef HAVE_WORKING_POSIX_OPENPT
-#define _XOPEN_SOURCE 600 
+#  ifndef _XOPEN_SOURCE
+     /* On OS X and BSD, we must leave _XOPEN_SOURCE undefined in order for
+      * the prototype of vsyslog() to be included.
+      */
+#    if !(defined(__APPLE__) || defined(__FreeBSD__) || defined(__DragonFly__))
+#      define _XOPEN_SOURCE 600
+#    endif
+#  endif
 #endif
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -60,6 +68,7 @@
 #include <dirent.h>
 #include <termios.h>
 #include <time.h>
+
 #ifdef HAVE_SYSLOG_H
 #  include <syslog.h>
 #endif
@@ -68,6 +77,9 @@
 #endif
 #ifdef HAVE_UTMP_H
 #  include <utmp.h>
+#endif
+#ifdef HAVE_LIBUTIL_H
+#  include <libutil.h>
 #endif
 #ifdef HAVE_UTIL_H
 #  include <util.h>

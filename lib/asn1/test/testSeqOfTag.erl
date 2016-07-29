@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 1997-2012. All Rights Reserved.
+%% Copyright Ericsson AB 1997-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -21,7 +22,7 @@
 
 -export([main/1]).
 
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 -include("External.hrl").
 
 
@@ -44,47 +45,47 @@
 -record('Exp',{os, bool}).
 
 main(_Rules) ->
-    roundtrip('SeqTagNt', #'SeqTagNt'{nt=[#'NT'{os="kalle",bool=true},
-					  #'NT'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagNtI', #'SeqTagNtI'{imp=[#'Imp'{os="kalle",bool=true},
-					     #'Imp'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagNtE', #'SeqTagNtE'{exp=[#'Exp'{os="kalle",bool=true},
-					     #'Exp'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagI', #'SeqTagI'{nt=[#'NT'{os="kalle",bool=true},
-					#'NT'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagII', #'SeqTagII'{imp=[#'Imp'{os="kalle",bool=true},
-					   #'Imp'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagIE', #'SeqTagIE'{exp=[#'Exp'{os="kalle",bool=true},
-					   #'Exp'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagE', #'SeqTagE'{nt=[#'NT'{os="kalle",bool=true},
-					#'NT'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagEI', #'SeqTagEI'{imp=[#'Imp'{os="kalle",bool=true},
-					   #'Imp'{os="kalle",bool=true}]}),
-    roundtrip('SeqTagEE', #'SeqTagEE'{exp=[#'Exp'{os="kalle",bool=true},
-					   #'Exp'{os="kalle",bool=true}]}),
+    roundtrip('SeqTagNt', #'SeqTagNt'{nt=[#'NT'{os = <<"kalle">>,bool=true},
+					  #'NT'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagNtI', #'SeqTagNtI'{imp=[#'Imp'{os = <<"kalle">>,bool=true},
+					     #'Imp'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagNtE', #'SeqTagNtE'{exp=[#'Exp'{os = <<"kalle">>,bool=true},
+					     #'Exp'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagI', #'SeqTagI'{nt=[#'NT'{os = <<"kalle">>,bool=true},
+					#'NT'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagII', #'SeqTagII'{imp=[#'Imp'{os = <<"kalle">>,bool=true},
+					   #'Imp'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagIE', #'SeqTagIE'{exp=[#'Exp'{os = <<"kalle">>,bool=true},
+					   #'Exp'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagE', #'SeqTagE'{nt=[#'NT'{os = <<"kalle">>,bool=true},
+					#'NT'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagEI', #'SeqTagEI'{imp=[#'Imp'{os = <<"kalle">>,bool=true},
+					   #'Imp'{os = <<"kalle">>,bool=true}]}),
+    roundtrip('SeqTagEE', #'SeqTagEE'{exp=[#'Exp'{os = <<"kalle">>,bool=true},
+					   #'Exp'{os = <<"kalle">>,bool=true}]}),
     roundtrip('SeqTagXNt',
-	      #'SeqTagXNt'{xnt=[#'XSeqNT'{os="kalle",bool=true},
-				#'XSeqNT'{os="kalle",bool=true}]}),
+	      #'SeqTagXNt'{xnt=[#'XSeqNT'{os = <<"kalle">>,bool=true},
+				#'XSeqNT'{os = <<"kalle">>,bool=true}]}),
     roundtrip('SeqTagXI',
-	      #'SeqTagXI'{ximp=[#'XSeqImp'{os="kalle",bool=true},
-				#'XSeqImp'{os="kalle",bool=true}]}),
+	      #'SeqTagXI'{ximp=[#'XSeqImp'{os = <<"kalle">>,bool=true},
+				#'XSeqImp'{os = <<"kalle">>,bool=true}]}),
     roundtrip('SeqTagXE',
-	      #'SeqTagXE'{xexp=[#'XSeqExp'{os="kalle",bool=true},
-				#'XSeqExp'{os="kalle",bool=true}]}),
+	      #'SeqTagXE'{xexp=[#'XSeqExp'{os = <<"kalle">>,bool=true},
+				#'XSeqExp'{os = <<"kalle">>,bool=true}]}),
     roundtrip('SeqTagImpX',
-	      #'SeqTagImpX'{xnt=[#'XSeqNT'{os="kalle",bool=true},
-				 #'XSeqNT'{os="kalle",bool=true}],
-			    ximp=[#'XSeqImp'{os="kalle",bool=true},
-				  #'XSeqImp'{os="kalle",bool=true}],
-			    xexp=[#'XSeqExp'{os="kalle",bool=true},
-				  #'XSeqExp'{os="kalle",bool=true}]}),
+	      #'SeqTagImpX'{xnt=[#'XSeqNT'{os = <<"kalle">>,bool=true},
+				 #'XSeqNT'{os = <<"kalle">>,bool=true}],
+			    ximp=[#'XSeqImp'{os = <<"kalle">>,bool=true},
+				  #'XSeqImp'{os = <<"kalle">>,bool=true}],
+			    xexp=[#'XSeqExp'{os = <<"kalle">>,bool=true},
+				  #'XSeqExp'{os = <<"kalle">>,bool=true}]}),
     roundtrip('SeqTagExpX',
-	      #'SeqTagExpX'{xnt=[#'XSeqNT'{os="kalle",bool=true},
-				 #'XSeqNT'{os="kalle",bool=true}],
-			    ximp=[#'XSeqImp'{os="kalle",bool=true},
-				  #'XSeqImp'{os="kalle",bool=true}],
-			    xexp=[#'XSeqExp'{os="kalle",bool=true},
-				  #'XSeqExp'{os="kalle",bool=true}]}),
+	      #'SeqTagExpX'{xnt=[#'XSeqNT'{os = <<"kalle">>,bool=true},
+				 #'XSeqNT'{os = <<"kalle">>,bool=true}],
+			    ximp=[#'XSeqImp'{os = <<"kalle">>,bool=true},
+				  #'XSeqImp'{os = <<"kalle">>,bool=true}],
+			    xexp=[#'XSeqExp'{os = <<"kalle">>,bool=true},
+				  #'XSeqExp'{os = <<"kalle">>,bool=true}]}),
     ok.
 
 roundtrip(T, V) ->

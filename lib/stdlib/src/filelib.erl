@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 1997-2013. All Rights Reserved.
+%% Copyright Ericsson AB 1997-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 
@@ -234,7 +235,7 @@ ensure_dir(F) ->
 	    %% Protect against infinite loop
 	    {error,einval};
 	false ->
-	    ensure_dir(Dir),
+	    _ = ensure_dir(Dir),
 	    case file:make_dir(Dir) of
 		{error,eexist}=EExist ->
 		    case do_is_dir(Dir, file) of
@@ -265,7 +266,7 @@ do_wildcard(Pattern, Cwd, Mod) ->
     lists:sort(Files).
 
 do_wildcard_1({exists,File}, Mod) ->
-    case eval_read_file_info(File, Mod) of
+    case eval_read_link_info(File, Mod) of
 	{ok,_} -> [File];
 	_ -> []
     end;
@@ -371,7 +372,7 @@ compile_wildcard(Pattern, Cwd0) ->
     [Root|Rest] = filename:split(Pattern),
     case filename:pathtype(Root) of
 	relative ->
-	    Cwd = filename:join([Cwd0]),
+	    Cwd = prepare_base(Cwd0),
 	    compile_wildcard_2([Root|Rest], {cwd,Cwd});
 	_ ->
 	    compile_wildcard_2(Rest, {root,0,Root})
@@ -496,6 +497,16 @@ eval_read_file_info(File, erl_prim_loader) ->
     end;
 eval_read_file_info(File, Mod) ->
     Mod:read_file_info(File).
+
+eval_read_link_info(File, file) ->
+    file:read_link_info(File);
+eval_read_link_info(File, erl_prim_loader) ->
+    case erl_prim_loader:read_link_info(File) of
+        error -> {error, erl_prim_loader};
+        Res-> Res
+    end;
+eval_read_link_info(File, Mod) ->
+    Mod:read_link_info(File).
 
 eval_list_dir(Dir, file) ->
     file:list_dir(Dir);

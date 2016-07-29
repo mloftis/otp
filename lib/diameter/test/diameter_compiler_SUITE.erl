@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2010-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2010-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -120,6 +121,16 @@
          {avp_has_duplicate_flag,
           " -",
           " MM"},
+         {ok,
+          "@vendor 0",
+          "@vendor 10415"},
+         {ok,
+          [{"@vendor 0", "@vendor 10415"},
+           {"Proxy-Info .*M$", "&V"},
+           {"Proxy-Info ::= [^>]*", "& 10415 "}]},
+         {grouped_vendor_id_without_flag,
+          [{"@vendor 0", "@vendor 10415"},
+           {"Proxy-Info ::= [^>]*", "& 10415 "}]},
          {avp_has_vendor_id,
           "@avp_types",
           "@avp_vendor_id 667 Class\n&"},
@@ -137,6 +148,9 @@
           "\\1Time"},
          {grouped_avp_not_defined,
           "Failed-AVP *.*",
+          ""},
+         {grouped_avp_not_grouped,
+          "Failed-AVP ::=.*\n.*}",
           ""},
          {grouped_vendor_id_without_flag,
           "(Failed-AVP .*)>",
@@ -304,6 +318,21 @@
          {avp_not_defined,
           "CEA ::=",
           "<XXX> &"},
+         {ok,
+          "@avp_types",
+          "@codecs tmod Session-Id &"},
+         {ok,
+          "@avp_types",
+          "@custom_types tmod Session-Id &"},
+         {avp_not_defined,
+          "@avp_types",
+          "@codecs tmod OctetString &"},
+         {avp_not_defined,
+          "@avp_types",
+          "@custom_types tmod OctetString &"},
+         {avp_already_defined,
+          "@avp_types",
+          "@codecs tmod Session-Id @custom_types tmod Session-Id &"},
          {not_loaded,
           [{"@avp_types", "@inherits nomod XXX &"},
            {"CEA ::=", "<XXX> &"}]},
@@ -397,8 +426,8 @@ replace({E, Mods}, Bin) ->
     case {E, parse(B, [{include, here()}]), Mods} of
         {ok, {ok, Dict}, _} ->
             Dict;
-        {_, {error, S}, _} ->
-            S
+        {_, {error, {E,_} = T}, _} when E /= ok ->
+            diameter_make:format_error(T)
     end.
 
 re({RE, Repl}, Bin) ->

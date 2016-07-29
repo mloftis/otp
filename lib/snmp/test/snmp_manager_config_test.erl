@@ -1,18 +1,19 @@
 %% 
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2004-2013. All Rights Reserved.
+%% Copyright Ericsson AB 2004-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %% 
@@ -31,7 +32,7 @@
 %%----------------------------------------------------------------------
 %% Include files
 %%----------------------------------------------------------------------
--include_lib("test_server/include/test_server.hrl").
+-include_lib("common_test/include/ct.hrl").
 -include("snmp_test_lib.hrl").
 -include_lib("snmp/src/manager/snmpm_usm.hrl").
 
@@ -693,7 +694,7 @@ start_with_invalid_manager_conf_file1(Conf) when is_list(Conf) ->
 		       "arne_anka", "4001", "500", "\"bmkEngine\""),
     ?line {error, Reason12} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason12]),
-    ?line {failed_check, _, _, 2, {invalid_ip_address, _}} = Reason12,
+    ?line {failed_check, _, _, 2, {bad_address, _}} = Reason12,
     await_config_not_running(),
 
     %% --
@@ -702,7 +703,7 @@ start_with_invalid_manager_conf_file1(Conf) when is_list(Conf) ->
 		       "9999", "4001", "500", "\"bmkEngine\""),
     ?line {error, Reason13} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason13]),
-    ?line {failed_check, _, _, 2, {invalid_ip_address, _}} = Reason13,
+    ?line {failed_check, _, _, 2, {bad_address, _}} = Reason13,
     await_config_not_running(),
 
     %% --
@@ -720,7 +721,8 @@ start_with_invalid_manager_conf_file1(Conf) when is_list(Conf) ->
 		       "[134,138,177,189]", "-1", "500", "\"bmkEngine\""),
     ?line {error, Reason22} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason22]),
-    ?line {failed_check, _, _, 3, {invalid_integer, _}} = Reason22,
+    io:format("Reason22: ~p~n", [Reason22]),
+   ?line {failed_check, _, _, 3, {bad_port, _}} = Reason22,
     await_config_not_running(),
 
     %% --
@@ -729,7 +731,7 @@ start_with_invalid_manager_conf_file1(Conf) when is_list(Conf) ->
 		       "[134,138,177,189]", "\"kalle-anka\"", "500", "\"bmkEngine\""),
     ?line {error, Reason23} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason23]),
-    ?line {failed_check, _, _, 3, {invalid_integer, _}} = Reason23,
+    ?line {failed_check, _, _, 3, {bad_port, _}} = Reason23,
     await_config_not_running(),
 
     %% --
@@ -1047,7 +1049,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     case config_start(Opts) of
 	{error, Reason51} ->
 	    p("start failed (as expected): ~p", [Reason51]),
-	    ?line {failed_check, _, _, _, {bad_address, _}} = Reason51,
+	    ?line {failed_check, _, _, _, {bad_domain, _}} = Reason51,
 	    await_config_not_running();
 	OK_51 ->
 	    exit({error, {unexpected_success, "51", OK_51}})
@@ -1073,7 +1075,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     case config_start(Opts) of
 	{error, Reason53} ->
 	    p("start failed (as expected): ~p", [Reason53]),
-	    ?line {failed_check, _, _, _, {invalid_ip_address, _}} = Reason53,
+	    ?line {failed_check, _, _, _, {bad_address, _}} = Reason53,
 	    await_config_not_running();
 	OK_53 ->
 	    exit({error, {unexpected_success, "53", OK_53}})
@@ -1086,7 +1088,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     case config_start(Opts) of
 	{error, Reason54} ->
 	    p("start failed (as expected): ~p", [Reason54]),
-	    ?line {failed_check, _, _, _, {invalid_ip_address, _}} = Reason54,
+	    ?line {failed_check, _, _, _, {bad_address, _}} = Reason54,
 	    await_config_not_running();
 	OK_54 ->
 	    exit({error, {unexpected_success, "54", OK_54}})
@@ -1098,7 +1100,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     write_agents_conf(ConfDir, [Agent55]),
     ?line {error, Reason55} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason55]),
-    ?line {failed_check, _, _, _, {invalid_ip_address, _}} = Reason55,
+    ?line {failed_check, _, _, _, {bad_address, _}} = Reason55,
     await_config_not_running(),
 
     %% --
@@ -1107,7 +1109,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     write_agents_conf(ConfDir, [Agent61]),
     ?line {error, Reason61} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason61]),
-    ?line {failed_check, _, _, _, {invalid_integer, _}} = Reason61,
+    ?line {failed_check, _, _, _, {bad_address, _}} = Reason61,
     await_config_not_running(),
 
     %% --
@@ -1116,7 +1118,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     write_agents_conf(ConfDir, [Agent62]),
     ?line {error, Reason62} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason62]),
-    ?line {failed_check, _, _, _, {invalid_integer, _}} = Reason62,
+    ?line {failed_check, _, _, _, {bad_address, _}} = Reason62,
     await_config_not_running(),
 
     %% --
@@ -1125,7 +1127,7 @@ start_with_invalid_agents_conf_file1(Conf) when is_list(Conf) ->
     write_agents_conf(ConfDir, [Agent63]),
     ?line {error, Reason63} = config_start(Opts),
     p("start failed (as expected): ~p", [Reason63]),
-    ?line {failed_check, _, _, _, {invalid_integer, _}} = Reason63,
+    ?line {failed_check, _, _, _, {bad_address, _}} = Reason63,
     await_config_not_running(),
 
     %% --
@@ -2168,7 +2170,6 @@ register_usm_user_using_function(Conf) when is_list(Conf) ->
     %% --
     p("done"),
     ok.
-%%    ?SKIP(not_yet_implemented).
 
 
 %% 
@@ -2258,8 +2259,9 @@ create_and_increment(Conf) when is_list(Conf) ->
     ?line {ok, _Pid} = snmpm_config:start_link(Opts),
 
     %% Random init
-    {A,B,C} = erlang:now(),
-    random:seed(A,B,C),
+    random:seed(erlang:phash2([node()]),
+                erlang:monotonic_time(),
+                erlang:unique_integer()),
 
     StartVal = random:uniform(2147483647),
     IncVal   = 42, 

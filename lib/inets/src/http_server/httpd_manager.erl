@@ -1,18 +1,19 @@
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2000-2014. All Rights Reserved.
+%% Copyright Ericsson AB 2000-2016. All Rights Reserved.
 %%
-%% The contents of this file are subject to the Erlang Public License,
-%% Version 1.1, (the "License"); you may not use this file except in
-%% compliance with the License. You should have received a copy of the
-%% Erlang Public License along with this software. If not, it can be
-%% retrieved online at http://www.erlang.org/.
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
 %%
-%% Software distributed under the License is distributed on an "AS IS"
-%% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-%% the License for the specific language governing rights and limitations
-%% under the License.
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %%
 %% %CopyrightEnd%
 %%
@@ -28,7 +29,7 @@
 -export([start/2, start_link/2, start_link/3, start_link/4, 
 	 stop/1, reload/2]).
 -export([new_connection/1]).
--export([config_match/2, config_match/3]).
+-export([config_match/3, config_match/4]).
 -export([block/2, block/3, unblock/1]).
 
 %% gen_server exports
@@ -54,7 +55,8 @@
 start(ConfigFile, ConfigList) ->
     Port = proplists:get_value(port,ConfigList,80),
     Addr = proplists:get_value(bind_address, ConfigList),
-    Name = make_name(Addr,Port),
+    Profile = proplists:get_value(profile, ConfigList, default),
+    Name = make_name(Addr, Port, Profile),
     gen_server:start({local,Name},?MODULE,
 		     [ConfigFile, ConfigList, 15000, Addr, Port],[]).
 
@@ -65,7 +67,8 @@ start_link(ConfigFile, ConfigList) ->
 start_link(ConfigFile, ConfigList, AcceptTimeout) ->
     Port = proplists:get_value(port, ConfigList, 80),
     Addr = proplists:get_value(bind_address, ConfigList),
-    Name = make_name(Addr, Port),
+    Profile = proplists:get_value(profile, ConfigList, default),
+    Name = make_name(Addr, Port, Profile),
     
     gen_server:start_link({local, Name},?MODULE,
 			  [ConfigFile, ConfigList, 
@@ -74,7 +77,8 @@ start_link(ConfigFile, ConfigList, AcceptTimeout) ->
 start_link(ConfigFile, ConfigList, AcceptTimeout, ListenSocket) ->
     Port = proplists:get_value(port, ConfigList, 80),
     Addr = proplists:get_value(bind_address, ConfigList),
-    Name = make_name(Addr, Port),
+    Profile = proplists:get_value(profile, ConfigList, default),
+    Name = make_name(Addr, Port, Profile),
     
     gen_server:start_link({local, Name},?MODULE,
 			  [ConfigFile, ConfigList, AcceptTimeout, Addr, 
@@ -97,10 +101,10 @@ unblock(ServerRef) ->
 new_connection(Manager) ->
     call(Manager, {new_connection, self()}).
 
-config_match(Port, Pattern) ->
-    config_match(undefined,Port,Pattern).
-config_match(Addr, Port, Pattern) ->
-    Name = httpd_util:make_name("httpd",Addr,Port),
+config_match(Port, Profile, Pattern) ->
+    config_match(undefined,Port, Profile, Pattern).
+config_match(Addr, Port, Profile, Pattern) ->
+    Name = httpd_util:make_name("httpd",Addr,Port, Profile),
     call(whereis(Name), {config_match, Pattern}).
 
 %%%--------------------------------------------------------------------
@@ -210,9 +214,10 @@ handle_call({block , Blocker, Mode, Timeout}, From,
 handle_call({block , _, _, _}, _, State) ->
     {reply, {error, blocked}, State};
 
-handle_call({unblock, Blocker}, _, #state{blocker_ref = {Blocker,_},
+handle_call({unblock, Blocker}, _, #state{blocker_ref = {Blocker, Monitor},
 					  admin_state = blocked} = State) ->
-    
+   
+    erlang:demonitor(Monitor),
     {reply, ok, 
      State#state{admin_state = unblocked, blocker_ref = undefined}};
 
@@ -247,37 +252,36 @@ handle_cast(Message, State) ->
 handle_info(connections_terminated, #state{admin_state = shutting_down,
 					   blocking_from = From} = State) ->
     gen_server:reply(From, ok),
-    {noreply, State#state{admin_state = blocked, blocking_from = undefined,
-			  blocker_ref = undefined}};
+    {noreply, State#state{admin_state = blocked, blocking_from = undefined}};
 handle_info(connections_terminated, State) ->
     {noreply, State};
 
-handle_info({block_timeout, non_disturbing}, 
+handle_info({block_timeout, non_disturbing, Blocker}, 
 	    #state{admin_state = shutting_down,
 		   blocking_from = From,
-		   blocker_ref = {_, Monitor}} = State) ->
+		   blocker_ref = {_, Monitor} = Blocker} = State) ->
     erlang:demonitor(Monitor),		  
     gen_server:reply(From, {error, timeout}),
     {noreply, State#state{admin_state = unblocked, blocking_from = undefined,
 			  blocker_ref = undefined}};
-handle_info({block_timeout, disturbing}, 
+handle_info({block_timeout, disturbing, Blocker}, 
 	    #state{admin_state = shutting_down,
 		   blocking_from = From,
-		   blocker_ref = {_, Monitor},
+		   blocker_ref = Blocker,
 		   connection_sup = Sup} = State) ->
     SupPid = whereis(Sup),
     shutdown_connections(SupPid),
-    erlang:demonitor(Monitor),		  
     gen_server:reply(From, ok),
-    {noreply, State#state{admin_state = blocked, blocker_ref = undefined,
+    {noreply, State#state{admin_state = blocked,
 			  blocking_from = undefined}};
 handle_info({block_timeout, _, _}, State) ->
     {noreply, State};	   
 
 handle_info({'DOWN', _, process, Pid, _Info}, 
 	    #state{admin_state = Admin,
-		   blocker_ref = {Pid, _}} = State) when 
+		   blocker_ref = {Pid, Monitor}} = State) when 
       Admin =/= unblocked ->
+    erlang:demonitor(Monitor),	
     {noreply, State#state{admin_state = unblocked,
 			  blocking_from = undefined,
 			  blocker_ref = undefined}};
@@ -333,18 +337,16 @@ handle_new_connection(_UsageState, _AdminState, State, _Handler) ->
 
 handle_block(disturbing, infinity, 
 	     #state{connection_sup = CSup,
-		    blocking_from = From,
-		    blocker_ref = {_, Monitor}} = State) ->
+		    blocking_from = From} = State) ->
     SupPid = whereis(CSup),
     shutdown_connections(SupPid),
-    erlang:demonitor(Monitor),		  
     gen_server:reply(From, ok),
-    {noreply, State#state{admin_state = blocked, blocker_ref = undefined,
+    {noreply, State#state{admin_state = blocked,
 			  blocking_from = undefined}};
-handle_block(disturbing, Timeout, #state{connection_sup = CSup} = State) ->
+handle_block(disturbing, Timeout, #state{connection_sup = CSup, blocker_ref = Blocker} = State) ->
     Manager = self(),
     spawn_link(fun() -> wait_for_shutdown(CSup, Manager) end),
-    erlang:send_after(Timeout, self(), {block_timeout, disturbing}),
+    erlang:send_after(Timeout, self(), {block_timeout, disturbing, Blocker}),
     {noreply, State#state{admin_state = shutting_down}};
 
 handle_block(non_disturbing, infinity, 
@@ -354,10 +356,10 @@ handle_block(non_disturbing, infinity,
     {noreply, State#state{admin_state = shutting_down}};
 
 handle_block(non_disturbing, Timeout,  
-	     #state{connection_sup = CSup} = State) ->
+	     #state{connection_sup = CSup, blocker_ref = Blocker} = State) ->
     Manager = self(),
     spawn_link(fun() -> wait_for_shutdown(CSup, Manager) end),
-    erlang:send_after(Timeout, self(), {block_timeout, non_disturbing}),
+    erlang:send_after(Timeout, self(), {block_timeout, non_disturbing, Blocker}),
     {noreply, State#state{admin_state = shutting_down}}.
     
 handle_reload(undefined, #state{config_file = undefined} = State) ->
@@ -448,8 +450,8 @@ get_ustate(ConnectionCnt,State) ->
 	    active
     end.
 
-make_name(Addr,Port) ->
-    httpd_util:make_name("httpd",Addr,Port).
+make_name(Addr, Port, Profile) ->
+    httpd_util:make_name("httpd", Addr, Port, Profile).
 
 
 report_error(State,String) ->

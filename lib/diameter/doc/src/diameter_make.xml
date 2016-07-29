@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="latin1" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <!DOCTYPE erlref SYSTEM "erlref.dtd" [
   <!ENTITY compile_forms2
   '<seealso marker="compiler:compile#forms-2">compile:forms/2</seealso>'>
@@ -16,20 +16,21 @@
 <header>
 <copyright>
 <year>2012</year>
-<year>2013</year>
+<year>2016</year>
 <holder>Ericsson AB. All Rights Reserved.</holder>
 </copyright>
 <legalnotice>
-The contents of this file are subject to the Erlang Public License,
-Version 1.1, (the "License"); you may not use this file except in
-compliance with the License. You should have received a copy of the
-Erlang Public License along with this software. If not, it can be
-retrieved online at http://www.erlang.org/.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+ 
+    http://www.apache.org/licenses/LICENSE-2.0
 
-Software distributed under the License is distributed on an "AS IS"
-basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
-the License for the specific language governing rights and limitations
-under the License.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
 </legalnotice>
 
@@ -52,7 +53,7 @@ under the License.
 <p>
 The function &codec; is used to compile a diameter
 &dictionary; into Erlang source.
-The resulting source implements the interface diameter required
+The resulting source implements the interface diameter requires
 to encode and decode the dictionary's messages and AVPs.</p>
 
 <p>
@@ -175,6 +176,10 @@ Note that a dictionary's <c>&dict_name;</c>, together with the
 The <c>&dict_name;</c> of a literal input dictionary defaults to
 <c>dictionary</c>.</p>
 
+<p>
+A returned error reason can be converted into a readable string using
+&format_error;.</p>
+
 </desc>
 </func>
 
@@ -203,6 +208,18 @@ using <c>&dict_inherits;</c>.
 That is, construct an equivalent dictionary in which all AVP's are
 definined in the dictionary itself.
 The return value is also a parsed dictionary.</p>
+</desc>
+</func>
+
+<!-- ===================================================================== -->
+
+<func>
+<name>format_error(Reason) -> string()</name>
+<fsummary>Turn an error reason into a readable string.</fsummary>
+<desc>
+
+<p>
+Turn an error reason returned by &codec; into a readable string.</p>
 </desc>
 </func>
 

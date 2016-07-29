@@ -14,7 +14,7 @@
 %% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
 %% USA
 %%
-%% @copyright 1998-2006 Richard Carlsson
+%% @copyright 1998-2014 Richard Carlsson
 %% @author Richard Carlsson <carlsson.richard@gmail.com>
 %% @end
 %% =====================================================================
@@ -151,7 +151,8 @@ default_printer(Tree, Options) ->
 %% @spec parse_transform(Forms::[syntaxTree()], Options::[term()]) ->
 %%           [syntaxTree()]
 %%
-%%         syntaxTree() = erl_syntax:syntaxTree()
+%% @type syntaxTree() = erl_syntax:syntaxTree(). An abstract syntax
+%% tree. See the {@link erl_syntax} module for details.
 %%
 %% @doc Allows Igor to work as a component of the Erlang compiler.
 %% Including the term `{parse_transform, igor}' in the
@@ -212,7 +213,7 @@ merge(Name, Files) ->
 %% @spec merge(Name::atom(), Files::[filename()], Options::[term()]) ->
 %%           [filename()]
 %%
-%%	    filename() = file:filename()
+%% @type filename() = file:filename()
 %%
 %% @doc Merges source code files to a single file. `Name'
 %% specifies the name of the resulting module - not the name of the
@@ -367,6 +368,7 @@ merge_files(Name, Files, Options) ->
 %% @spec merge_files(Name::atom(), Sources::[Forms],
 %%                   Files::[filename()], Options::[term()]) ->
 %%           {syntaxTree(), [stubDescriptor()]}
+%%
 %%     Forms = syntaxTree() | [syntaxTree()]
 %%
 %% @doc Merges source code files and syntax trees to a single syntax
@@ -695,7 +697,7 @@ merge_files1(Files, Opts) ->
 		preserved  :: boolean(),
 		no_headers :: boolean(),
 		notes      :: notes(),
-		redirect   :: dict(),	% = dict(atom(), atom())
+		redirect   :: dict:dict(atom(), atom()),
 		no_imports :: ordsets:ordset(atom()),
 		options	   :: [option()]
 	       }).
@@ -727,7 +729,7 @@ merge_sources(Name, Sources, Opts) ->
 
 %% Data structure for keeping state during transformation.
 
--record(state, {export :: set()}).
+-record(state, {export :: sets:set({atom(), arity()})}).
 
 state__add_export(Name, Arity, S) ->
     S#state{export = sets:add_element({Name, Arity},
@@ -1039,7 +1041,7 @@ make_stub(M, Map, Env) ->
 -type atts()      :: 'delete' | 'kill'.
 -type file_atts() :: 'delete' | 'keep' | 'kill'.
 
--record(filter, {records         :: set(),
+-record(filter, {records         :: sets:set(atom()),
 		 file_attributes :: file_atts(),
 		 attributes      :: atts()}).
 
@@ -1588,17 +1590,18 @@ alias_expansions_2(Modules, Table) ->
 
 -record(code, {module     :: atom(),
 	       target     :: atom(),
-	       sources    :: set(),	% set(atom()),
-	       static     :: set(),	% set(atom()),
-	       safe       :: set(),	% set(atom()),
+	       sources    :: sets:set(atom()),
+	       static     :: sets:set(atom()),
+	       safe       :: sets:set(atom()),
 	       preserved  :: boolean(),
 	       no_headers :: boolean(),
 	       notes      :: notes(),
-	       map        :: map_fun(),
+	       map        :: map_fun() | 'undefined',
 	       renaming   :: fun((atom()) -> map_fun()),
-	       expand     :: dict(),	% = dict({atom(), integer()},
-					%      {atom(), {atom(), integer()}})
-	       redirect	  :: dict()	% = dict(atom(), atom())
+	       expand     :: dict:dict({atom(), integer()},
+                                       {atom(), {atom(), integer()}})
+                           | 'undefined',
+	       redirect	  :: dict:dict(atom(), atom())
 	      }).
 
 %% `Trees' must be a list of syntax trees of type `form_list'. The
@@ -1713,8 +1716,6 @@ transform(Tree, Env, St) ->
   	    transform_function(Tree, Env, St);
  	implicit_fun ->
  	    transform_implicit_fun(Tree, Env, St);
-  	rule ->
-  	    transform_rule(Tree, Env, St);
   	record_expr ->
   	    transform_record(Tree, Env, St);
   	record_index_expr ->
@@ -1777,27 +1778,6 @@ renaming_note(Name) ->
 
 rename_atom(Node, Atom) ->
     rewrite(Node, erl_syntax:atom(Atom)).
-
-%% Renaming Mnemosyne rules (just like function definitions)
-
-transform_rule(T, Env, St) ->
-    {T1, St1} = default_transform(T, Env, St),
-    F = erl_syntax_lib:analyze_rule(T1),
-    {V, Text} = case (Env#code.map)(F) of
-		    F ->
-			%% Not renamed
-			{none, []};
-		    {Atom, _Arity} ->
-			%% Renamed
-			Cs = erl_syntax:rule_clauses(T1),
-			N = rename_atom(
-			      erl_syntax:rule_name(T1),
-			      Atom),
-			T2 = rewrite(T1,
-				     erl_syntax:rule(N, Cs)),
-			{{value, T2}, renaming_note(Atom)}
-		end,
-    {maybe_modified(V, T1, 2, Text, Env), St1}.
 
 %% Renaming "implicit fun" expressions (done quietly).
 
@@ -2634,6 +2614,19 @@ get_module_info(Forms) ->
 fold_record_fields(Rs) ->
     [{N, [fold_record_field(F) || F <- Fs]} || {N, Fs} <- Rs].
 
+fold_record_field({_Name, {none, _Type}} = None) ->
+    None;
+fold_record_field({Name, {F, Type}}) ->
+    case erl_syntax:is_literal(F) of
+	true ->
+	    {Name, {value, erl_syntax:concrete(F)}, Type};
+	false ->
+	    %% The default value for the field is not a constant, so we
+	    %% represent it by a hash value instead. (We don't want to
+	    %% do this in the general case.)
+	    {Name, {hash, erlang:phash(F, 16#ffffff)}, Type}
+    end;
+%% The following two clauses handle code before Erlang/OTP 19.0.
 fold_record_field({_Name, none} = None) ->
     None;
 fold_record_field({Name, F}) ->
